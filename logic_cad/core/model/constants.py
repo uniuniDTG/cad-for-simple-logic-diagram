@@ -165,7 +165,7 @@ A4_LANDSCAPE_PRINTABLE_80_H_MM = A4_LANDSCAPE_HEIGHT_MM * 0.8
 
 # If a block definition’s bbox max side exceeds this (mm), INSERT is scaled down uniformly.
 # CAD exports often use thousands of drawing units; the editor viewport is A4-sized.
-SYMBOL_BLOCK_MAX_DIM_MM = 40.0
+SYMBOL_BLOCK_MAX_DIM_MM = 400.0
 
 
 def grid_snap_tolerance() -> float:

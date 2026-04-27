@@ -779,7 +779,7 @@ def paint_block_strokes(
         if layer.startswith("LD_PORT_"):
             continue
         dt = ent.dxftype()
-        if dt in ("POINT", "ATTDEF", "ATTRIB", "INSERT", "SEQEND", "HATCH"):
+        if dt in ("POINT", "ATTDEF", "ATTRIB", "INSERT", "SEQEND", "HATCH", "TEXT", "MTEXT"):
             continue
         try:
             path = make_path(ent)
@@ -805,6 +805,71 @@ def paint_block_strokes(
                 p1 = _local_pt(float(b.x), float(b.y), scale_x, scale_y)
                 painter.drawLine(p0, p1)
                 drawn = True
+    return drawn
+
+
+def paint_block_text_entities(
+    painter: QPainter,
+    doc: Drawing,
+    block_name: str,
+    *,
+    scale_x: float = 1.0,
+    scale_y: float = 1.0,
+) -> bool:
+    """Draw TEXT/MTEXT entities in block definitions on all visible layers."""
+    if block_name not in doc.blocks:
+        return False
+    blk = doc.blocks.get(block_name)
+    pen = QPen(QColor(220, 220, 220))
+    pen.setCosmetic(True)
+    painter.setPen(pen)
+    painter.setBrush(Qt.NoBrush)
+    drawn = False
+    for ent in blk:
+        dt = str(ent.dxftype()).upper()
+        if dt not in {"TEXT", "MTEXT"}:
+            continue
+        layer = str(getattr(ent.dxf, "layer", ""))
+        if layer == LAYER_CONTENTS_AREA or layer.startswith("LD_PORT_"):
+            continue
+        layout = normalize_dxf_text_entity(ent)
+        if not layout.text.strip():
+            continue
+        pos = _local_pt(layout.anchor_x, layout.anchor_y, scale_x, scale_y)
+        sf = min(abs(scale_x), abs(scale_y)) if scale_x and scale_y else 1.0
+        cap_mm = float(layout.height_mm) * sf
+        if layout.is_multiline:
+            paint_mtext_path_mm(
+                painter,
+                layout.text,
+                cap_mm,
+                pos,
+                width_mm=float(layout.width_mm) * sf,
+                rot_deg=-layout.render_rotation_deg,
+                halign=layout.render_halign,
+                valign=layout.render_valign,
+                width_fac=layout.render_width_factor,
+                fill=pen.color(),
+                font_family=layout.font_family,
+                font_families=layout.font_families,
+            )
+        else:
+            paint_text_path_mm(
+                painter,
+                layout.text,
+                cap_mm,
+                pos,
+                rot_deg=-layout.render_rotation_deg,
+                halign=layout.render_halign,
+                valign=layout.render_valign,
+                width_fac=layout.render_width_factor,
+                fit_length_mm=layout.render_fit_length_mm,
+                fit_mode=layout.render_fit_mode,
+                fill=pen.color(),
+                font_family=layout.font_family,
+                font_families=layout.font_families,
+            )
+        drawn = True
     return drawn
 
 
@@ -912,10 +977,11 @@ def paint_block_definition(
     instance_attribs: dict[str, tuple[str, bool]] | None = None,
     sym_height_mm: float | None = None,
 ) -> bool:
-    """Hatches + strokes + ATTDEF. Returns True if any geometry/text drawn."""
+    """Hatches + strokes + TEXT/MTEXT + ATTDEF. Returns True if any geometry/text drawn."""
     a = paint_block_hatches(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y, flatten=flatten)
     b = paint_block_strokes(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y, flatten=flatten)
-    c = paint_block_attdefs(
+    c = paint_block_text_entities(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y)
+    d = paint_block_attdefs(
         painter,
         doc,
         block_name,
@@ -927,4 +993,4 @@ def paint_block_definition(
         instance_attribs=instance_attribs,
         sym_height_mm=sym_height_mm,
     )
-    return a or b or c
+    return a or b or c or d

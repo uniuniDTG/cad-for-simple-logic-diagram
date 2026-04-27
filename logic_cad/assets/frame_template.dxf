@@ -489,7 +489,7 @@ $SKPOLY
   9
 $TDCREATE
  40
-2461155.729409722
+2461158.907337963
   9
 $TDUCREATE
  40
@@ -497,7 +497,7 @@ $TDUCREATE
   9
 $TDUPDATE
  40
-2461155.729409722
+2461158.907337963
   9
 $TDUUPDATE
  40
@@ -549,7 +549,7 @@ $SPLINESEGS
   9
 $HANDSEED
   5
-95
+99
   9
 $SURFTAB1
  70
@@ -929,11 +929,11 @@ $PSTYLEMODE
   9
 $FINGERPRINTGUID
   2
-{250663A9-56BA-4E54-9AB1-4414356072B2}
+{847830F6-4E4B-4528-9F7C-53A3673DEE0F}
   9
 $VERSIONGUID
   2
-{FAF1EC50-2030-4DEA-9C7B-BE669E1DECC2}
+{FCE0CDAA-F06C-4E50-BFCA-6F3E0B5AB7D4}
   9
 $EXTNAMES
 290
@@ -2233,7 +2233,7 @@ LAYER
 100
 AcDbSymbolTable
  70
-28
+31
   0
 LAYER
   5
@@ -2900,6 +2900,78 @@ LD_CONTENTS_TEXT
 0
  62
 7
+  6
+Continuous
+370
+-3
+390
+13
+347
+21
+  0
+LAYER
+  5
+74
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+CHECK_MANUAL
+ 70
+0
+ 62
+6
+  6
+Continuous
+370
+-3
+390
+13
+347
+21
+  0
+LAYER
+  5
+75
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+CHECK_TEXT
+ 70
+0
+ 62
+3
+  6
+Continuous
+370
+-3
+390
+13
+347
+21
+  0
+LAYER
+  5
+76
+330
+1
+100
+AcDbSymbolTableRecord
+100
+AcDbLayerTableRecord
+  2
+CHECK_MISC
+ 70
+0
+ 62
+5
   6
 Continuous
 370
@@ -3709,7 +3781,7 @@ ACAD
   0
 APPID
   5
-74
+77
 330
 3
 100
@@ -3723,7 +3795,7 @@ LD_APP
   0
 APPID
   5
-92
+96
 330
 3
 100
@@ -3737,7 +3809,7 @@ HATCHBACKGROUNDCOLOR
   0
 APPID
   5
-93
+97
 330
 3
 100
@@ -3957,7 +4029,7 @@ AcDbBlockTableRecord
   0
 BLOCK_RECORD
   5
-75
+78
 330
 9
 100
@@ -3977,7 +4049,7 @@ LD_PAPER_FRAME
   0
 BLOCK_RECORD
   5
-7D
+88
 330
 9
 100
@@ -3997,7 +4069,7 @@ CONTENTS_HEADER
   0
 BLOCK_RECORD
   5
-84
+8F
 330
 9
 100
@@ -4101,9 +4173,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-76
+79
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4127,9 +4199,9 @@ LD_PAPER_FRAME
   0
 LWPOLYLINE
   5
-78
+7B
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4157,11 +4229,35 @@ AcDbPolyline
  20
 210.0
   0
+LINE
+  5
+7C
+330
+78
+100
+AcDbEntity
+  8
+LD_FRAME
+100
+AcDbLine
+ 10
+12.0
+ 20
+24.0
+ 30
+0.0
+ 11
+285.0
+ 21
+24.0
+ 31
+0.0
+  0
 ATTDEF
   5
-79
+7D
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4171,13 +4267,13 @@ AcDbText
  10
 14.0
  20
-22.0
+32.0
  30
 0.0
  40
 2.5
   1
-{{DWG_NO}}
+
 100
 AcDbAttributeDefinition
   3
@@ -4189,9 +4285,9 @@ DWG_NO
   0
 ATTDEF
   5
-7A
+7E
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4201,13 +4297,75 @@ AcDbText
  10
 98.0
  20
-22.0
+32.0
  30
 0.0
  40
 2.5
   1
-{{PAGE_NUM}}/{{PAGE_TOTAL}} {{PAGE_NAME}}
+
+ 72
+2
+100
+AcDbAttributeDefinition
+  3
+
+  2
+PAGE_NUM
+ 70
+0
+  0
+ATTDEF
+  5
+7F
+330
+78
+100
+AcDbEntity
+  8
+LD_FRAME_TEXT
+100
+AcDbText
+ 10
+103.0
+ 20
+32.0
+ 30
+0.0
+ 40
+2.5
+  1
+
+100
+AcDbAttributeDefinition
+  3
+
+  2
+PAGE_TOTAL
+ 70
+0
+  0
+ATTDEF
+  5
+80
+330
+78
+100
+AcDbEntity
+  8
+LD_FRAME_TEXT
+100
+AcDbText
+ 10
+112.0
+ 20
+32.0
+ 30
+0.0
+ 40
+2.5
+  1
+
 100
 AcDbAttributeDefinition
   3
@@ -4219,9 +4377,9 @@ PAGE_NAME
   0
 ATTDEF
   5
-7B
+81
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4231,13 +4389,13 @@ AcDbText
  10
 176.0
  20
-22.0
+32.0
  30
 0.0
  40
 2.5
   1
-{{PAGE_DESC}}
+
 100
 AcDbAttributeDefinition
   3
@@ -4249,9 +4407,9 @@ PAGE_DESC
   0
 ATTDEF
   5
-7C
+82
 330
-75
+78
 100
 AcDbEntity
   8
@@ -4261,13 +4419,13 @@ AcDbText
  10
 283.0
  20
-22.0
+32.0
  30
 0.0
  40
 2.5
   1
-Rev: {{PAGE_REV}}
+
  72
 2
 100
@@ -4279,171 +4437,141 @@ PAGE_REV
  70
 0
   0
-ENDBLK
-  5
-77
-330
-75
-100
-AcDbEntity
-  8
-0
-100
-AcDbBlockEnd
-  0
-BLOCK
-  5
-7E
-330
-7D
-100
-AcDbEntity
-  8
-0
-100
-AcDbBlockBegin
-  2
-CONTENTS_HEADER
- 70
-2
- 10
-0.0
- 20
-0.0
- 30
-0.0
-  3
-CONTENTS_HEADER
-  1
-
-  0
-LWPOLYLINE
-  5
-80
-330
-7D
-100
-AcDbEntity
-  8
-LD_CONTENTS_FRAME
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-0.0
- 20
-0.0
- 10
-60.0
- 20
-0.0
- 10
-60.0
- 20
--8.0
- 10
-0.0
- 20
--8.0
-  0
-ATTDEF
-  5
-81
-330
-7D
-100
-AcDbEntity
-  8
-LD_CONTENTS_TEXT
-100
-AcDbText
- 10
-1.63
- 20
--5.25
- 30
-0.0
- 40
-2.5
-  1
-番号
-100
-AcDbAttributeDefinition
-  3
-
-  2
-PAGE_NAME
- 70
-0
-  0
-ATTDEF
-  5
-82
-330
-7D
-100
-AcDbEntity
-  8
-LD_CONTENTS_TEXT
-100
-AcDbText
- 10
-13.47
- 20
--5.25
- 30
-0.0
- 40
-2.5
-  1
-説明
-100
-AcDbAttributeDefinition
-  3
-
-  2
-PAGE_DESC
- 70
-0
-  0
-ATTDEF
+TEXT
   5
 83
 330
-7D
+78
 100
 AcDbEntity
   8
-LD_CONTENTS_TEXT
+LD_FRAME_TEXT
 100
 AcDbText
  10
-52.5
+100.5
  20
--5.19
+32.0
  30
 0.0
  40
 2.5
   1
-改訂
+/
+ 11
+100.5
+ 21
+32.0
+ 31
+0.0
 100
-AcDbAttributeDefinition
-  3
-
-  2
-PAGE_REV
- 70
-0
+AcDbText
+  0
+LINE
+  5
+84
+330
+78
+100
+AcDbEntity
+  8
+CHECK_MANUAL
+100
+AcDbLine
+ 10
+10.0
+ 20
+50.0
+ 30
+0.0
+ 11
+45.0
+ 21
+50.0
+ 31
+0.0
+  0
+CIRCLE
+  5
+85
+330
+78
+100
+AcDbEntity
+  8
+CHECK_MISC
+100
+AcDbCircle
+ 10
+52.0
+ 20
+50.0
+ 30
+0.0
+ 40
+3.0
+  0
+TEXT
+  5
+86
+330
+78
+100
+AcDbEntity
+  8
+CHECK_TEXT
+100
+AcDbText
+ 10
+58.0
+ 20
+50.0
+ 30
+0.0
+ 40
+2.2
+  1
+\U+3042 literal
+ 11
+58.0
+ 21
+50.0
+ 31
+0.0
+100
+AcDbText
+  0
+MTEXT
+  5
+87
+330
+78
+100
+AcDbEntity
+  8
+CHECK_TEXT
+100
+AcDbMText
+ 10
+58.0
+ 20
+55.0
+ 30
+0.0
+ 40
+2.2
+ 41
+90.0
+ 71
+1
+  1
+あ実文字 / \U+3042 escaped
   0
 ENDBLK
   5
-7F
+7A
 330
-7D
+78
 100
 AcDbEntity
   8
@@ -4453,9 +4581,9 @@ AcDbBlockEnd
   0
 BLOCK
   5
-85
+89
 330
-84
+88
 100
 AcDbEntity
   8
@@ -4463,7 +4591,7 @@ AcDbEntity
 100
 AcDbBlockBegin
   2
-CONTENTS_ROW
+CONTENTS_HEADER
  70
 2
  10
@@ -4473,15 +4601,15 @@ CONTENTS_ROW
  30
 0.0
   3
-CONTENTS_ROW
+CONTENTS_HEADER
   1
 
   0
 LWPOLYLINE
   5
-87
+8B
 330
-84
+88
 100
 AcDbEntity
   8
@@ -4511,9 +4639,9 @@ AcDbPolyline
   0
 ATTDEF
   5
-88
+8C
 330
-84
+88
 100
 AcDbEntity
   8
@@ -4529,7 +4657,7 @@ AcDbText
  40
 2.5
   1
-{{PAGE_NAME}}
+No.
 100
 AcDbAttributeDefinition
   3
@@ -4541,9 +4669,9 @@ PAGE_NAME
   0
 ATTDEF
   5
-89
+8D
 330
-84
+88
 100
 AcDbEntity
   8
@@ -4559,7 +4687,7 @@ AcDbText
  40
 2.5
   1
-{{PAGE_DESC}}
+Description
 100
 AcDbAttributeDefinition
   3
@@ -4571,9 +4699,9 @@ PAGE_DESC
   0
 ATTDEF
   5
-8A
+8E
 330
-84
+88
 100
 AcDbEntity
   8
@@ -4589,7 +4717,7 @@ AcDbText
  40
 2.5
   1
-{{PAGE_REV}}
+Rev.
 100
 AcDbAttributeDefinition
   3
@@ -4601,9 +4729,169 @@ PAGE_REV
   0
 ENDBLK
   5
-86
+8A
 330
-84
+88
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockEnd
+  0
+BLOCK
+  5
+90
+330
+8F
+100
+AcDbEntity
+  8
+0
+100
+AcDbBlockBegin
+  2
+CONTENTS_ROW
+ 70
+2
+ 10
+0.0
+ 20
+0.0
+ 30
+0.0
+  3
+CONTENTS_ROW
+  1
+
+  0
+LWPOLYLINE
+  5
+92
+330
+8F
+100
+AcDbEntity
+  8
+LD_CONTENTS_FRAME
+100
+AcDbPolyline
+ 90
+4
+ 70
+1
+ 10
+0.0
+ 20
+0.0
+ 10
+60.0
+ 20
+0.0
+ 10
+60.0
+ 20
+-8.0
+ 10
+0.0
+ 20
+-8.0
+  0
+ATTDEF
+  5
+93
+330
+8F
+100
+AcDbEntity
+  8
+LD_CONTENTS_TEXT
+100
+AcDbText
+ 10
+1.63
+ 20
+-5.25
+ 30
+0.0
+ 40
+2.5
+  1
+
+100
+AcDbAttributeDefinition
+  3
+
+  2
+PAGE_NAME
+ 70
+0
+  0
+ATTDEF
+  5
+94
+330
+8F
+100
+AcDbEntity
+  8
+LD_CONTENTS_TEXT
+100
+AcDbText
+ 10
+13.47
+ 20
+-5.25
+ 30
+0.0
+ 40
+2.5
+  1
+
+100
+AcDbAttributeDefinition
+  3
+
+  2
+PAGE_DESC
+ 70
+0
+  0
+ATTDEF
+  5
+95
+330
+8F
+100
+AcDbEntity
+  8
+LD_CONTENTS_TEXT
+100
+AcDbText
+ 10
+52.5
+ 20
+-5.19
+ 30
+0.0
+ 40
+2.5
+  1
+
+100
+AcDbAttributeDefinition
+  3
+
+  2
+PAGE_REV
+ 70
+0
+  0
+ENDBLK
+  5
+91
+330
+8F
 100
 AcDbEntity
   8
@@ -4616,216 +4904,6 @@ ENDSEC
 SECTION
   2
 ENTITIES
-  0
-INSERT
-  5
-8B
-330
-17
-100
-AcDbEntity
-  8
-0
-100
-AcDbBlockReference
- 66
-1
-  2
-LD_PAPER_FRAME
- 10
-0.0
- 20
-0.0
- 30
-0.0
-1001
-LD_APP
-1000
-ver:1
-1000
-uid:e57325a6-6522-4f3d-a178-205be7bcd90d
-1000
-type:PAPER_FRAME
-  0
-ATTRIB
-  5
-8D
-330
-17
-100
-AcDbEntity
-  8
-LD_FRAME_TEXT
-100
-AcDbText
- 10
-14.0
- 20
-22.0
- 30
-0.0
- 40
-2.5
-  1
-{{DWG_NO}}
- 11
-14.0
- 21
-22.0
- 31
-0.0
-100
-AcDbAttribute
-  2
-DWG_NO
- 70
-0
-  0
-ATTRIB
-  5
-8E
-330
-17
-100
-AcDbEntity
-  8
-LD_FRAME_TEXT
-100
-AcDbText
- 10
-98.0
- 20
-22.0
- 30
-0.0
- 40
-2.5
-  1
-{{PAGE_NUM}}/{{PAGE_TOTAL}} {{PAGE_NAME}}
- 11
-98.0
- 21
-22.0
- 31
-0.0
-100
-AcDbAttribute
-  2
-PAGE_NAME
- 70
-0
-  0
-ATTRIB
-  5
-8F
-330
-17
-100
-AcDbEntity
-  8
-LD_FRAME_TEXT
-100
-AcDbText
- 10
-176.0
- 20
-22.0
- 30
-0.0
- 40
-2.5
-  1
-{{PAGE_DESC}}
- 11
-176.0
- 21
-22.0
- 31
-0.0
-100
-AcDbAttribute
-  2
-PAGE_DESC
- 70
-0
-  0
-ATTRIB
-  5
-90
-330
-17
-100
-AcDbEntity
-  8
-LD_FRAME_TEXT
-100
-AcDbText
- 10
-283.0
- 20
-22.0
- 30
-0.0
- 40
-2.5
-  1
-Rev: {{PAGE_REV}}
- 72
-2
- 11
-283.0
- 21
-22.0
- 31
-0.0
-100
-AcDbAttribute
-  2
-PAGE_REV
- 70
-0
-  0
-SEQEND
-  5
-8C
-330
-8B
-100
-AcDbEntity
-  8
-0
-  0
-LWPOLYLINE
-  5
-91
-330
-17
-100
-AcDbEntity
-  8
-LD_CONTENTS_AREA
-100
-AcDbPolyline
- 90
-4
- 70
-1
- 10
-31.36
- 20
-185.72
- 10
-273.87
- 20
-185.72
- 10
-273.87
- 20
-39.98
- 10
-31.36
- 20
-39.98
   0
 ENDSEC
   0
@@ -5817,7 +5895,7 @@ CREATED_BY_EZDXF
   3
 WRITTEN_BY_EZDXF
 350
-94
+98
   0
 DICTIONARYVAR
   5
@@ -5829,11 +5907,11 @@ DictionaryVariables
 280
 0
   1
-1.4.3 @ 2026-04-24T08:30:21.282384+00:00
+1.4.3 @ 2026-04-27T12:46:34.114398+00:00
   0
 DICTIONARYVAR
   5
-94
+98
 330
 2D
 100
@@ -5841,7 +5919,7 @@ DictionaryVariables
 280
 0
   1
-1.4.3 @ 2026-04-24T08:30:21.287537+00:00
+1.4.3 @ 2026-04-27T12:46:34.116397+00:00
   0
 ENDSEC
   0

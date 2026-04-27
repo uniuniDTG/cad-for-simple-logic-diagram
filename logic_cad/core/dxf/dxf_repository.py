@@ -5,9 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import ezdxf
+from ezdxf import recover
 from ezdxf.document import Drawing
 from ezdxf.tools.standards import setup_linetypes
 
+from logic_cad.core.debug.debug_log import logic_cad_log
 from logic_cad.core.model.constants import (
     ALL_LAYERS,
     LAYER_CONTENTS_AREA,
@@ -80,6 +82,37 @@ def ensure_drawing_units_mm(doc: Drawing) -> None:
     doc.units = _INSUNITS_MM
 
 
+def load_dxf_with_recover(path: str | Path, *, errors: str = "ignore") -> Drawing:
+    """Load DXF with fast path first, recover fallback second.
+
+    Args:
+        path: DXF file path.
+        errors: Recover decode policy passed to ``recover.readfile``.
+
+    Returns:
+        Loaded drawing.
+
+    Raises:
+        ezdxf.DXFError: If both fast path and recover path fail.
+        IOError: File I/O failure.
+        UnicodeDecodeError: Recover decode error when ``errors='strict'``.
+    """
+    p = str(path)
+    try:
+        return ezdxf.readfile(p)
+    except ezdxf.DXFError as fast_ex:
+        logic_cad_log("dxf", f"readfile failed; trying recover: {p} ({fast_ex})")
+        doc, auditor = recover.readfile(p, errors=errors)
+        if auditor.has_errors:
+            logic_cad_log("dxf", f"recover loaded with audit issues: {p}")
+            try:
+                for row in auditor.errors[:5]:
+                    logic_cad_log("dxf", f"recover audit error: {row}")
+            except Exception:
+                pass
+        return doc
+
+
 def new_document() -> Drawing:
     # setup=True adds dim-style arrow blocks (_ARCHTICK, …) on layer "0"; we only need text styles.
     doc = ezdxf.new("R2010", setup=["styles"], units=_INSUNITS_MM)
@@ -119,7 +152,7 @@ def ensure_standard_layers(doc: Drawing) -> None:
 
 
 def readfile(path: str | Path) -> Drawing:
-    doc = ezdxf.readfile(str(path))
+    doc = load_dxf_with_recover(path, errors="ignore")
     ensure_drawing_units_mm(doc)
     ensure_standard_layers(doc)
     ensure_standard_linetypes(doc)

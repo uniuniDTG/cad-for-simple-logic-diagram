@@ -13,17 +13,15 @@ from logic_cad.core.model.constants import (
     LAYER_FRAME,
     LAYER_FRAME_TEXT,
 )
-from logic_cad.core.model.xdata import build_ld_app_tags, new_uid, set_entity_xdata
 from logic_cad.core.pages.page_order import list_paper_layout_names_sorted
 from logic_cad.core.services.layout_service import apply_frame_template_from_path
 
 
 def _write_minimal_frame_template(path: Path, dwg_attdef_text: str) -> None:
-    """Minimal template: ``LD_PAPER_FRAME`` block + one modelspace INSERT (like generate/)."""
+    """Minimal template: frame block definitions only (no modelspace entities)."""
     doc = ezdxf.new("R2010", setup=["styles"], units=4)
     ensure_standard_layers(doc)
     ensure_regapp(doc)
-    msp = doc.modelspace()
     pb = doc.blocks.new(BLOCK_PAPER_FRAME)
     pb.add_lwpolyline(
         [(0, 0), (200, 0), (200, 120), (0, 120)],
@@ -37,10 +35,6 @@ def _write_minimal_frame_template(path: Path, dwg_attdef_text: str) -> None:
         height=2.5,
         dxfattribs={"layer": LAYER_FRAME_TEXT},
     )
-    ins = msp.add_blockref(BLOCK_PAPER_FRAME, (0.0, 0.0, 0.0))
-    ins.add_auto_attribs({"DWG_NO": dwg_attdef_text})
-    uid = new_uid()
-    set_entity_xdata(ins, build_ld_app_tags("1", uid, ENTITY_TYPE_PAPER_FRAME))
     doc.saveas(str(path))
 
 

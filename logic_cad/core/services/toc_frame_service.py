@@ -84,17 +84,11 @@ def _attdef_default_text_by_tag(doc: Drawing, block_name: str) -> dict[str, str]
 
 
 def _sync_paper_frame_attribs(ins, doc: Drawing, mapping: dict[str, str]) -> None:
-    bname = str(ins.dxf.name)
-    fmt = _attdef_default_text_by_tag(doc, bname)
     for a in ins.attribs:
-        tag = str(a.dxf.tag)
+        tag = str(a.dxf.tag).strip().upper()
         if tag not in FRAME_ATTDEF_TAGS:
             continue
-        template = fmt.get(tag, "")
-        if "{{" in template:
-            a.dxf.text = expand_frame_placeholders(template, mapping)
-        else:
-            a.dxf.text = mapping.get(tag, "")
+        a.dxf.text = mapping.get(tag, "")
 
 
 def refresh_frame_for_layout(doc: Drawing, layout_name: str) -> None:

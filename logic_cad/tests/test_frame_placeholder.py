@@ -39,15 +39,29 @@ def _add_paper_frame_insert(doc: ezdxf.Drawing, *, with_custom: bool = False) ->
     pb.add_lwpolyline([(0, 0), (50, 0), (50, 40), (0, 40)], close=True, dxfattribs={"layer": LAYER_FRAME})
     pb.add_attdef(
         tag="DWG_NO",
-        text="{{DWG_NO}}",
+        text="",
         insert=(5.0, 10.0),
         height=2.5,
         dxfattribs={"layer": LAYER_FRAME_TEXT},
     )
     pb.add_attdef(
-        tag="PAGE_NAME",
-        text="{{PAGE_NUM}}/{{PAGE_TOTAL}} {{PAGE_NAME}}",
+        tag="PAGE_NUM",
+        text="",
         insert=(5.0, 8.0),
+        height=2.5,
+        dxfattribs={"layer": LAYER_FRAME_TEXT},
+    )
+    pb.add_attdef(
+        tag="PAGE_TOTAL",
+        text="",
+        insert=(5.0, 8.0),
+        height=2.5,
+        dxfattribs={"layer": LAYER_FRAME_TEXT},
+    )
+    pb.add_attdef(
+        tag="PAGE_NAME",
+        text="",
+        insert=(7.0, 8.0),
         height=2.5,
         dxfattribs={"layer": LAYER_FRAME_TEXT},
     )
@@ -60,8 +74,10 @@ def _add_paper_frame_insert(doc: ezdxf.Drawing, *, with_custom: bool = False) ->
             dxfattribs={"layer": LAYER_FRAME_TEXT},
         )
     auto: dict[str, str] = {
-        "DWG_NO": "{{DWG_NO}}",
-        "PAGE_NAME": "{{PAGE_NUM}}/{{PAGE_TOTAL}} {{PAGE_NAME}}",
+        "DWG_NO": "",
+        "PAGE_NUM": "",
+        "PAGE_TOTAL": "",
+        "PAGE_NAME": "",
     }
     if with_custom:
         auto["CUSTOM"] = "Static"
@@ -83,7 +99,9 @@ def test_refresh_updates_paper_frame_attribs() -> None:
     ins = next(e for e in blk if e.dxftype() == "INSERT" and str(e.dxf.name) == BLOCK_PAPER_FRAME)
     by_tag = {str(a.dxf.tag): str(a.dxf.text or "") for a in ins.attribs}
     assert by_tag["DWG_NO"] == "DWG-99"
-    assert by_tag["PAGE_NAME"] == "1/1 Layout1"
+    assert by_tag["PAGE_NUM"] == "1"
+    assert by_tag["PAGE_TOTAL"] == "1"
+    assert by_tag["PAGE_NAME"] == "Layout1"
 
 
 def test_refresh_page_num_respects_user_header() -> None:
@@ -98,7 +116,9 @@ def test_refresh_page_num_respects_user_header() -> None:
     blk = doc.blocks.get(layout.block_record_name)
     ins = next(e for e in blk if e.dxftype() == "INSERT" and str(e.dxf.name) == BLOCK_PAPER_FRAME)
     by_tag = {str(a.dxf.tag): str(a.dxf.text or "") for a in ins.attribs}
-    assert by_tag["PAGE_NAME"] == "4/9 Layout1"
+    assert by_tag["PAGE_NUM"] == "4"
+    assert by_tag["PAGE_TOTAL"] == "9"
+    assert by_tag["PAGE_NAME"] == "Layout1"
 
 
 def test_refresh_leaves_unknown_attrib_unchanged() -> None:

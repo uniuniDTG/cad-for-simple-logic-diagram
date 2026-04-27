@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import re
 from typing import Any
 
 from ezdxf.entities import DXFEntity
@@ -38,6 +39,8 @@ _FONT_FILE_STEM_ALIASES: dict[str, str] = {
     "yugothicui": "Yu Gothic UI",
     "meiryo": "Meiryo",
 }
+
+_DXF_UNICODE_ESCAPE_RE = re.compile(r"\\U\+([0-9A-Fa-f]{4,8})")
 
 
 @dataclass(frozen=True)
@@ -340,7 +343,23 @@ def normalize_newlines(text: str) -> str:
     """
 
     t = str(text or "")
+    t = _decode_dxf_unicode_escapes(t)
     return t.replace("\\P", "\n").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _decode_dxf_unicode_escapes(text: str) -> str:
+    """Decode DXF unicode escapes like ``\\U+3042`` to Unicode characters."""
+
+    def _replace(match: re.Match[str]) -> str:
+        try:
+            cp = int(match.group(1), 16)
+            if cp <= 0x10FFFF:
+                return chr(cp)
+        except Exception:
+            pass
+        return match.group(0)
+
+    return _DXF_UNICODE_ESCAPE_RE.sub(_replace, str(text or ""))
 
 
 def mtext_attachment_to_text_align(attachment_point: int) -> tuple[int, int]:

@@ -10,7 +10,16 @@ _LABEL_ATTDEF_RE = re.compile(r"^LABEL\d+$", re.IGNORECASE)
 _STATIC_LABEL_ATTDEF_RE = re.compile(r"^STATIC_LABEL\d+$", re.IGNORECASE)
 
 
-FRAME_ATTDEF_TAGS = frozenset({"DWG_NO", "PAGE_NAME", "PAGE_DESC", "PAGE_REV"})
+FRAME_ATTDEF_TAGS = frozenset(
+    {
+        "DWG_NO",
+        "PAGE_NAME",
+        "PAGE_DESC",
+        "PAGE_REV",
+        "PAGE_NUM",
+        "PAGE_TOTAL",
+    }
+)
 
 
 def is_frame_attdef_tag(tag: str) -> bool:

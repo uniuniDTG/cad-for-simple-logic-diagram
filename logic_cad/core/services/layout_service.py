@@ -43,7 +43,7 @@ from logic_cad.core.model.constants import (
     PEER_UID_XDATA,
     TARGET_LAYOUT_XDATA,
 )
-from logic_cad.core.dxf.dxf_repository import ensure_standard_layers
+from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, load_dxf_with_recover
 from logic_cad.core.debug.debug_log import logic_cad_log
 from logic_cad.core.debug.debug_symlib import symlib_log
 from logic_cad.core.pages.page_order import (
@@ -129,7 +129,7 @@ def ensure_frame_template_blocks(doc: Drawing, path: Path | None = None) -> bool
             break
     if chosen is None:
         return False
-    src = ezdxf.readfile(str(chosen))
+    src = load_dxf_with_recover(chosen, errors="ignore")
     import_frame_template_defined_blocks(doc, src)
     return True
 
@@ -503,11 +503,11 @@ def _strip_paper_frame_inserts_from_paper_block(doc: Drawing, blk) -> None:
 
 
 def apply_frame_template_from_path(doc: Drawing, path: Path) -> None:
-    """Replace frame template block definitions and re-import modelspace template into every paper layout.
+    """Replace frame template block definitions and re-apply frame INSERT to every paper layout.
 
     Removes existing app-tagged ``LD_PAPER_FRAME`` inserts on each page, strips top-level
-    ``LD_CONTENTS_AREA`` guides, copies template modelspace into each paperspace block via
-    :func:`import_frame_template`, then rebuilds TOC grid and frame captions.
+    ``LD_CONTENTS_AREA`` guides, then re-applies frame block references via
+    :func:`import_frame_template` before rebuilding TOC grid and frame captions.
 
     Args:
         doc: Target drawing.
@@ -521,7 +521,7 @@ def apply_frame_template_from_path(doc: Drawing, path: Path) -> None:
     if not p.is_file():
         raise FileNotFoundError(str(p))
     symlib_log(f"apply_frame_template_from_path path={p}")
-    src = ezdxf.readfile(str(p))
+    src = load_dxf_with_recover(p, errors="ignore")
     ensure_standard_layers(src)
     _replace_frame_template_block_definitions(doc, src)
     for layout_name in list_paper_layout_names_sorted(doc):
@@ -697,12 +697,13 @@ def _paper_frame_attrib_defaults(doc: Drawing) -> dict[str, str]:
 
 
 def import_frame_template(doc: Drawing, layout_name: str, path: Path | None = None) -> int:
-    """Copy template **modelspace** entities into the paper layout block (visible on canvas).
+    """Import frame blocks and place one ``LD_PAPER_FRAME`` INSERT on a paper layout.
 
     Search order when ``path`` is None: ``assets/frame_template.dxf``, then
     ``generate/frame_template.dxf`` at repo root.
 
-    Returns the number of entities copied (0 if skipped or none).
+    Returns:
+        Number of inserted/reused frame blockrefs (0 or 1).
     """
     if layout_name not in doc.layouts:
         symlib_log(f"frame_template: unknown layout {layout_name!r}")
@@ -726,43 +727,44 @@ def import_frame_template(doc: Drawing, layout_name: str, path: Path | None = No
             "template: no file (assets/frame_template.dxf or generate/frame_template.dxf)",
         )
         return 0
-    src = ezdxf.readfile(str(chosen))
+    src = load_dxf_with_recover(chosen, errors="ignore")
     import_frame_template_defined_blocks(doc, src)
-    n = 0
-    added_handles: list[str] = []
-    for e in list(src.modelspace()):
-        if str(getattr(e.dxf, "layer", "")) == LAYER_CONTENTS_AREA:
+    if BLOCK_PAPER_FRAME not in doc.blocks:
+        symlib_log("frame_template: missing LD_PAPER_FRAME block definition; skip insert")
+        return 0
+    frame_inserts = [
+        e for e in blk if e.dxftype() == "INSERT" and str(getattr(e.dxf, "name", "")) == BLOCK_PAPER_FRAME
+    ]
+    target_ins = None
+    for ins in frame_inserts:
+        if get_type(ins) == ENTITY_TYPE_PAPER_FRAME:
+            target_ins = ins
+            break
+    if target_ins is None and frame_inserts:
+        target_ins = frame_inserts[0]
+    for ins in frame_inserts:
+        if ins is target_ins:
             continue
-        try:
-            ne = e.copy()
-            blk.add_entity(ne)
-            added_handles.append(str(ne.dxf.handle))
-            n += 1
-        except Exception as ex:
-            symlib_log(f"frame_template: skip {e.dxftype()} ({ex})")
-    added = set(added_handles)
+        destroy_entity(doc, ins)
+    created = False
+    if target_ins is None:
+        target_ins = blk.add_blockref(BLOCK_PAPER_FRAME, (0.0, 0.0, 0.0))
+        created = True
     defadd = _paper_frame_attrib_defaults(doc)
-    for e in list(blk):
-        if str(e.dxf.handle) not in added:
-            continue
-        if e.dxftype() != "INSERT":
-            continue
-        if str(e.dxf.name) != BLOCK_PAPER_FRAME:
-            continue
-        if not list(e.attribs) and defadd:
-            try:
-                e.add_auto_attribs(defadd)
-            except Exception as ex:
-                symlib_log(f"frame_template: add_auto_attribs ({ex})")
-        set_entity_xdata(e, build_ld_app_tags("1", new_uid(), ENTITY_TYPE_PAPER_FRAME))
+    if not list(target_ins.attribs) and defadd:
+        try:
+            target_ins.add_auto_attribs(defadd)
+        except Exception as ex:
+            symlib_log(f"frame_template: add_auto_attribs ({ex})")
+    set_entity_xdata(target_ins, build_ld_app_tags("1", new_uid(), ENTITY_TYPE_PAPER_FRAME))
     symlib_log(
-        f"frame_template: copied {n} modelspace entities from {chosen.name} -> layout {layout_name!r} (paper block)"
+        f"frame_template: {'created' if created else 'reused'} frame insert on layout {layout_name!r}"
     )
     logic_cad_log(
         "frame",
-        f"template: imported {n} entities from {chosen} into layout {layout_name!r}",
+        f"template: applied block-only frame from {chosen} into layout {layout_name!r}",
     )
-    return n
+    return 1
 
 
 class LayoutService:
