@@ -35,7 +35,11 @@ from logic_cad.core.dxf.dxf_validator import validate as validate_document
 from logic_cad.core.undo.history import HistoryService, destroy_entity, find_entity_by_uid
 from logic_cad.core.pages.page_order import is_toc_layout_name
 from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
-from logic_cad.core.pages.page_ref import layout_name_for_insert, refresh_page_ref_syms_on_layout
+from logic_cad.core.pages.page_ref import (
+    layout_name_for_insert,
+    refresh_all_page_ref_syms,
+    refresh_page_ref_syms_on_layout,
+)
 from logic_cad.core.model.index_store import IndexStore
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory
 from logic_cad.core.services.layout_service import LayoutService, import_symbol_library
@@ -205,6 +209,7 @@ class LogicDiagram:
 
         merge_layout_page_xdata(self.doc, layout_name, page_desc=description, page_rev=revision)
         refresh_frame_for_layout(self.doc, layout_name)
+        refresh_all_page_ref_syms(self.doc)
         if TOC_LAYOUT_NAME in self.doc.layouts:
             self.regenerate_toc()
 
@@ -730,6 +735,17 @@ class LogicDiagram:
         self.symbols.set_page_ref(self.current_layout_name, uid, target_layout, self.list_pages())
         self.rebuild_index()
 
+    def set_page_ref_target_info_visibility(
+        self, uid: str, *, show_page_name: bool, show_page_desc: bool
+    ) -> None:
+        self.symbols.set_page_ref_target_info_visibility(
+            self.current_layout_name,
+            uid,
+            show_page_name=show_page_name,
+            show_page_desc=show_page_desc,
+        )
+        self.rebuild_index()
+
     def place_wire_branch(self, pos: tuple[float, float], ref: str | None = None) -> str:
         pos = snap_to_grid(*pos)
         uid = self.symbols.place_wire_branch(self.current_layout_name, pos, ref)
@@ -871,6 +887,7 @@ class LogicDiagram:
             touched: set[str | None] = {wd.get("src"), wd.get("dst")}
             self.wires.remove_wire_arrow_children(self.current_layout_name, uid)
             destroy_entity(self.doc, e)
+            self.wires.refresh_com_wire_markers(self.current_layout_name)
             self.rebuild_index()
             self._enqueue_gate_shrink_after_wire_topology_change(touched)
             return

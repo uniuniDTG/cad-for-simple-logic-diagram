@@ -14,7 +14,7 @@ from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
 from logic_cad.core.services.dynamic_gate_factory import gate_view_geometry_from_block_name
 
-_PORT_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI)$")
+_PORT_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI|COM)$")
 
 
 def _world_manhattan_escape(

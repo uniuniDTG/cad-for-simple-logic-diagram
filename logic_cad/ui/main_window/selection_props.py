@@ -15,6 +15,11 @@ from logic_cad.core.model.constants import (
     ENTITY_TYPE_USER_TEXT,
     ENTITY_TYPE_WIRE_BRANCH,
     GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW,
+    PAGE_REF_SHOW_PAGE_DESC_XDATA,
+    PAGE_REF_SHOW_PAGE_NAME_XDATA,
+    PAGE_REF_SHOW_TARGET_INFO_XDATA,
+    LAYER_WIRE_COM,
+    LINETYPE_COM,
     LINETYPE_LOGIC,
     PEER_UID_XDATA,
     TARGET_LAYOUT_XDATA,
@@ -52,10 +57,16 @@ def on_selection_changed(win: MainWindow) -> None:
     if isinstance(it, WireItem):
         e = find_entity_by_uid(win._diagram.doc, it.wire_uid)
         lt = LINETYPE_LOGIC
-        if e is not None and hasattr(e.dxf, "linetype"):
-            raw = e.dxf.linetype
-            if raw is not None and str(raw).strip():
-                lt = str(raw).strip()
+        if e is not None:
+            xd = read_ld_app_dict(e)
+            if str(xd.get("unit") or "").strip().upper() == "COM":
+                lt = LINETYPE_COM
+            elif hasattr(e.dxf, "linetype"):
+                raw = e.dxf.linetype
+                if raw is not None and str(raw).strip():
+                    lt = str(raw).strip()
+                elif str(getattr(e.dxf, "layer", "")).strip().upper() == LAYER_WIRE_COM.upper():
+                    lt = LINETYPE_COM
         win._props.show_wire(it.wire_uid, lt)
         return
     if isinstance(it, UserLineItem):
@@ -91,6 +102,14 @@ def on_selection_changed(win: MainWindow) -> None:
             it.symbol_uid,
             xd.get(TARGET_LAYOUT_XDATA, ""),
             xd.get("sym", sym_text),
+            show_page_name=(
+                str(xd.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "") == "1"
+                or str(xd.get(PAGE_REF_SHOW_PAGE_NAME_XDATA) or "") == "1"
+            ),
+            show_page_desc=(
+                str(xd.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "") == "1"
+                or str(xd.get(PAGE_REF_SHOW_PAGE_DESC_XDATA) or "") == "1"
+            ),
             block_name=ins.dxf.name,
             entity_type=str(t),
         )

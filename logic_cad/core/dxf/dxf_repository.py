@@ -26,6 +26,9 @@ from logic_cad.core.model.constants import (
     LAYER_USER_LINE_CENTER,
     LAYER_USER_LINE_CONTINUOUS,
     LAYER_USER_LINE_DASHED,
+    LAYER_WIRE_COM,
+    LAYER_WIRE_COM_SEGMENT,
+    LAYER_WIRE_COM_MARKER,
     LAYER_WIRE_LOGIC,
     LAYER_WIRE_VALUE,
     LINETYPE_CENTER,
@@ -130,8 +133,6 @@ def ensure_standard_linetypes(doc: Drawing) -> None:
     ``new(setup=['styles'])``). Without definitions, PDF export and some CADs draw solid lines.
     """
     setup_linetypes(doc)
-
-
 def ensure_standard_layers(doc: Drawing) -> None:
     """Create standard layers with default ACI colors on first insert only.
 
@@ -149,6 +150,12 @@ def ensure_standard_layers(doc: Drawing) -> None:
         doc.layers.get(LAYER_WIRE_LOGIC).dxf.linetype = LINETYPE_LOGIC
     if LAYER_WIRE_VALUE in doc.layers:
         doc.layers.get(LAYER_WIRE_VALUE).dxf.linetype = LINETYPE_VALUE
+    if LAYER_WIRE_COM in doc.layers:
+        doc.layers.get(LAYER_WIRE_COM).dxf.linetype = LINETYPE_CONTINUOUS
+    if LAYER_WIRE_COM_SEGMENT in doc.layers:
+        doc.layers.get(LAYER_WIRE_COM_SEGMENT).dxf.linetype = LINETYPE_CONTINUOUS
+    if LAYER_WIRE_COM_MARKER in doc.layers:
+        doc.layers.get(LAYER_WIRE_COM_MARKER).dxf.linetype = LINETYPE_CONTINUOUS
 
 
 def readfile(path: str | Path) -> Drawing:

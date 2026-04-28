@@ -30,6 +30,7 @@ from logic_cad.core.model.constants import (
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
     ENTITY_TYPE_USER_TEXT,
+    LINETYPE_COM,
     LINETYPE_LOGIC,
     LINETYPE_VALUE,
     WIRE_XDATA_SHOW_IN_ARROW,
@@ -195,11 +196,17 @@ class PropertyPanel(QWidget):
         self._page_target = QComboBox()
         self._sym_page = QLineEdit()
         self._sym_page.setReadOnly(True)
+        self._page_show_page_name = QCheckBox()
+        self._page_show_page_name.setChecked(False)
+        self._page_show_page_desc = QCheckBox()
+        self._page_show_page_desc.setChecked(False)
         self._page_target.currentIndexChanged.connect(self._on_page_target_changed)
         btn_page = QPushButton("適用")
         btn_page.clicked.connect(self._apply_page_ref)
         fp.addRow("リンク先ページ", self._page_target)
         fp.addRow("表示名（リンク先・自動）", self._sym_page)
+        fp.addRow("PAGE_NAME を表示", self._page_show_page_name)
+        fp.addRow("PAGE_DESC を表示", self._page_show_page_desc)
         fp.addRow(btn_page)
 
         self._page_inpage = QWidget()
@@ -260,6 +267,7 @@ class PropertyPanel(QWidget):
         self._wire_lt = QComboBox()
         self._wire_lt.addItem("実線(Logic)", LINETYPE_LOGIC)
         self._wire_lt.addItem("点線(Value)", LINETYPE_VALUE)
+        self._wire_lt.addItem("通信(COM)", LINETYPE_COM)
         btn_w = QPushButton("適用")
         btn_w.clicked.connect(self._apply_wire)
         fw.addRow("線種", self._wire_lt)
@@ -514,6 +522,8 @@ class PropertyPanel(QWidget):
         uid: str,
         target_layout: str,
         sym: str,
+        show_page_name: bool = False,
+        show_page_desc: bool = False,
         *,
         block_name: str = "",
         entity_type: str = "PAGE_REF",
@@ -545,6 +555,8 @@ class PropertyPanel(QWidget):
             self._page_target.setCurrentIndex(0)
         self._page_target.blockSignals(False)
         self._sym_page.setText(sym or "")
+        self._page_show_page_name.setChecked(bool(show_page_name))
+        self._page_show_page_desc.setChecked(bool(show_page_desc))
         self._stack.setCurrentIndex(self._PAGE)
 
     def show_inpage_ref(
@@ -782,6 +794,9 @@ class PropertyPanel(QWidget):
     def _wire_linetype_combo_index(combo: QComboBox, linetype: str) -> int:
         want = (linetype or "").strip().upper()
         for j in range(combo.count()):
+            data = combo.itemData(j)
+            if data is not None and str(data).strip().upper() == want:
+                return j
             if combo.itemText(j).strip().upper() == want:
                 return j
         return -1
@@ -894,6 +909,11 @@ class PropertyPanel(QWidget):
         try:
             with d.begin("props"):
                 d.set_page_ref(self._uid, str(pid))
+                d.set_page_ref_target_info_visibility(
+                    self._uid,
+                    show_page_name=self._page_show_page_name.isChecked(),
+                    show_page_desc=self._page_show_page_desc.isChecked(),
+                )
         except Exception:
             pass
         self._on_applied()

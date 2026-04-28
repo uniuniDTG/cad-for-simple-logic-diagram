@@ -7,6 +7,7 @@ from logic_cad.core.model.constants import (
     LAYER_DOC_META,
     LAYER_PORT,
     LAYER_VPORT,
+    LAYER_WIRE_COM,
 )
 
 
@@ -26,6 +27,9 @@ def is_hidden_for_passive_layout_primitive(layer: str) -> bool:
     if name == LAYER_PORT or name.startswith("LD_PORT_"):
         return True
     if name.startswith("LD_CHECKPOINT"):
+        return True
+    # COM logical carrier polyline is internal; visible style is emitted as helper LINE/CIRCLE entities.
+    if name == LAYER_WIRE_COM:
         return True
     if name in (LAYER_CONTENTS_AREA, LAYER_DOC_META, LAYER_VPORT):
         return True

@@ -30,3 +30,14 @@ def test_validate_reports_block_port_definition_gaps_and_duplicates():
         )
         for issue in issues
     )
+
+
+def test_validate_accepts_com_port_layers() -> None:
+    doc = new_document()
+    blk = doc.blocks.new("COM_PORT_BLOCK")
+    blk.add_point((0.0, 0.0), dxfattribs={"layer": "LD_PORT_IN0_COM"})
+    blk.add_point((1.0, 0.0), dxfattribs={"layer": "LD_PORT_OUT0_COM"})
+
+    issues = validate(doc)
+
+    assert not any("COM_PORT_BLOCK" in issue and "不正" in issue for issue in issues)

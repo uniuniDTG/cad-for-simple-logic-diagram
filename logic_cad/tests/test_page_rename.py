@@ -1,10 +1,16 @@
 """Layout rename updates PAGE_REF targets."""
 
-from logic_cad.core.model.constants import TARGET_LAYOUT_XDATA
+from logic_cad.core.model.constants import (
+    PAGE_REF_SHOW_PAGE_DESC_XDATA,
+    PAGE_REF_SHOW_PAGE_NAME_XDATA,
+    PAGE_REF_SHOW_TARGET_INFO_XDATA,
+    TARGET_LAYOUT_XDATA,
+)
 from logic_cad.core.dxf.dxf_repository import new_document
+from logic_cad.core.pages.page_layout_meta import merge_layout_page_xdata
 from logic_cad.core.pages.page_labels import page_ref_link_label, page_symbol_label
-from logic_cad.core.pages.page_ref import page_link_picker_label
-from logic_cad.core.services.layout_service import LayoutService
+from logic_cad.core.pages.page_ref import page_link_picker_label, refresh_all_page_ref_syms
+from logic_cad.core.services.layout_service import LayoutService, ensure_cross_page_reference_blocks
 from logic_cad.core.services.symbol_service import SymbolService
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory
 from logic_cad.core.model.xdata import read_ld_app_dict
@@ -61,4 +67,90 @@ def test_two_page_refs_same_target_sym_a_b() -> None:
 
     assert _sym(u0) == "102 A"
     assert _sym(u1) == "102 B"
+
+
+def _add_page_ref_target_attdefs(doc) -> None:
+    ensure_cross_page_reference_blocks(doc)
+    for block_name in ("PAGE_FROM", "PAGE_TO"):
+        blk = doc.blocks.get(block_name)
+        blk.add_attdef(tag="PAGE_NAME", text="", insert=(0.8, 1.8), height=0.28, dxfattribs={"layer": "LD_TEXT"})
+        blk.add_attdef(tag="PAGE_DESC", text="", insert=(0.8, 1.2), height=0.28, dxfattribs={"layer": "LD_TEXT"})
+
+
+def _attrib(ins, tag: str):
+    want = str(tag).upper()
+    for a in ins.attribs:
+        if str(a.dxf.tag).upper() == want:
+            return a
+    return None
+
+
+def test_page_ref_target_info_default_off_and_toggle_on() -> None:
+    doc = new_document()
+    _add_page_ref_target_attdefs(doc)
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("B")
+    merge_layout_page_xdata(doc, "B", page_desc="Target page", page_rev="")
+    ss = SymbolService(doc, DynamicGateFactory())
+    uid = ss.place_page_link(first, (12.0, 10.0), "B", ls.list_pages())
+    ins = ss.insert_by_uid(first, uid)
+    assert ins is not None
+    xd = read_ld_app_dict(ins)
+    assert str(xd.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "0") == "0"
+    assert str(xd.get(PAGE_REF_SHOW_PAGE_NAME_XDATA) or "0") == "0"
+    assert str(xd.get(PAGE_REF_SHOW_PAGE_DESC_XDATA) or "0") == "0"
+    a_name = _attrib(ins, "PAGE_NAME")
+    a_desc = _attrib(ins, "PAGE_DESC")
+    assert a_name is not None
+    assert a_desc is not None
+    assert str(a_name.dxf.text or "") == "B"
+    assert str(a_desc.dxf.text or "") == "Target page"
+    assert bool(a_name.dxf.invisible)
+    assert bool(a_desc.dxf.invisible)
+
+    ss.set_page_ref_target_info_visibility(first, uid, show_page_name=True, show_page_desc=False)
+    ins2 = ss.insert_by_uid(first, uid)
+    assert ins2 is not None
+    xd2 = read_ld_app_dict(ins2)
+    assert str(xd2.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "") == ""
+    assert str(xd2.get(PAGE_REF_SHOW_PAGE_NAME_XDATA) or "") == "1"
+    assert str(xd2.get(PAGE_REF_SHOW_PAGE_DESC_XDATA) or "") == "0"
+    a_name2 = _attrib(ins2, "PAGE_NAME")
+    a_desc2 = _attrib(ins2, "PAGE_DESC")
+    assert a_name2 is not None
+    assert a_desc2 is not None
+    assert not bool(a_name2.dxf.invisible)
+    assert bool(a_desc2.dxf.invisible)
+
+
+def test_refresh_all_page_ref_syms_keeps_toggle_and_updates_desc() -> None:
+    doc = new_document()
+    _add_page_ref_target_attdefs(doc)
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("B")
+    merge_layout_page_xdata(doc, "B", page_desc="Before", page_rev="")
+    ss = SymbolService(doc, DynamicGateFactory())
+    uid = ss.place_page_link(first, (18.0, 10.0), "B", ls.list_pages())
+    ss.set_page_ref_target_info_visibility(first, uid, show_page_name=False, show_page_desc=True)
+
+    merge_layout_page_xdata(doc, "B", page_desc="After", page_rev="")
+    refresh_all_page_ref_syms(doc)
+
+    ins = ss.insert_by_uid(first, uid)
+    assert ins is not None
+    xd = read_ld_app_dict(ins)
+    assert str(xd.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "") == ""
+    assert str(xd.get(PAGE_REF_SHOW_PAGE_NAME_XDATA) or "") == "0"
+    assert str(xd.get(PAGE_REF_SHOW_PAGE_DESC_XDATA) or "") == "1"
+    a_desc = _attrib(ins, "PAGE_DESC")
+    a_name = _attrib(ins, "PAGE_NAME")
+    assert a_desc is not None
+    assert a_name is not None
+    assert str(a_desc.dxf.text or "") == "After"
+    assert not bool(a_desc.dxf.invisible)
+    assert bool(a_name.dxf.invisible)
 

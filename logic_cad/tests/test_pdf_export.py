@@ -25,6 +25,7 @@ from logic_cad.core.undo.history import find_entity_by_uid
 from logic_cad.core.services.pdf_export_service import (
     PdfExportCancelled,
     PdfExportOptions,
+    _PdfExportFrontend,
     _paper_size_inches_from_layout,
     configuration_for_pdf_export,
     export_paper_layouts_to_pdf,
@@ -233,3 +234,28 @@ def test_export_pdf_keeps_user_line_linetype_and_layer() -> None:
     assert after is not None
     assert str(after.dxf.layer) == LAYER_USER_LINE_DASHED
     assert str(after.dxf.linetype).upper() == "DASHED"
+
+
+def test_pdf_frontend_decodes_dxf_unicode_without_mutating_source() -> None:
+    """PDF frontend decodes \\U+xxxx text on cloned entities only."""
+
+    doc = ezdxf.new("R2010", setup=["styles"])
+    msp = doc.modelspace()
+    txt = msp.add_text(r"\U+3042")
+    mtx = msp.add_mtext(r"\U+3042\Pnext")
+    blk = doc.blocks.new("B")
+    attdef = blk.add_attdef(r"\U+3042TAG", (0.0, 0.0), "v", height=2.5)
+
+    decoded_txt = _PdfExportFrontend._decoded_text_entity(txt)
+    decoded_mtx = _PdfExportFrontend._decoded_text_entity(mtx)
+    decoded_attdef = _PdfExportFrontend._decoded_text_entity(attdef)
+
+    assert decoded_txt is not txt
+    assert decoded_mtx is not mtx
+    assert decoded_attdef is not attdef
+    assert str(decoded_txt.dxf.text) == "あ"
+    assert str(decoded_mtx.text) == "あ\\Pnext"
+    assert str(decoded_attdef.dxf.tag) == "あTAG"
+    assert str(txt.dxf.text) == r"\U+3042"
+    assert str(mtx.text) == r"\U+3042\Pnext"
+    assert str(attdef.dxf.tag) == r"\U+3042TAG"

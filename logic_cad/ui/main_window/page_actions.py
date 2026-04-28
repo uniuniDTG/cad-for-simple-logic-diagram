@@ -23,6 +23,31 @@ if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
 
 
+PAGE_NAME_LABEL = "レイアウト名（CADタブ名）"
+PAGE_DESC_LABEL = "説明（目次・枠に表示）"
+PAGE_REV_LABEL = "改訂番号"
+
+
+def _add_page_meta_rows(
+    form: QFormLayout,
+    *,
+    name_editor: QLineEdit,
+    desc_editor: QLineEdit,
+    rev_editor: QLineEdit,
+) -> None:
+    """Add page metadata rows in canonical order.
+
+    Args:
+        form: Target form layout.
+        name_editor: Editor for layout/page name.
+        desc_editor: Editor for page description.
+        rev_editor: Editor for page revision.
+    """
+    form.addRow(PAGE_NAME_LABEL, name_editor)
+    form.addRow(PAGE_DESC_LABEL, desc_editor)
+    form.addRow(PAGE_REV_LABEL, rev_editor)
+
+
 def on_page_tab_bar_context(win: MainWindow, pos: QPoint) -> None:
     tab_bar = win._page_tabs.tabBar()
     idx = tab_bar.tabAt(pos)
@@ -45,9 +70,12 @@ def show_add_page_dialog(win: MainWindow) -> None:
     ed_name = QLineEdit()
     ed_rev = QLineEdit("0")
     ed_desc = QLineEdit()
-    form.addRow("ページ名", ed_name)
-    form.addRow("改訂番号", ed_rev)
-    form.addRow("説明", ed_desc)
+    _add_page_meta_rows(
+        form,
+        name_editor=ed_name,
+        desc_editor=ed_desc,
+        rev_editor=ed_rev,
+    )
     layout = QVBoxLayout(dlg)
     layout.addLayout(form)
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
@@ -135,9 +163,12 @@ def on_page_properties(win: MainWindow, layout_name: str) -> None:
     ed_name = QLineEdit(layout_name)
     ed_desc = QLineEdit(meta.get("page_desc", ""))
     ed_rev = QLineEdit(meta.get("page_rev", ""))
-    form.addRow("レイアウト名（CADタブ名）", ed_name)
-    form.addRow("説明（目次・枠に表示）", ed_desc)
-    form.addRow("改訂番号", ed_rev)
+    _add_page_meta_rows(
+        form,
+        name_editor=ed_name,
+        desc_editor=ed_desc,
+        rev_editor=ed_rev,
+    )
     layout.addLayout(form)
     buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
     buttons.accepted.connect(dlg.accept)

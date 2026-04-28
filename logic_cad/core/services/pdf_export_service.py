@@ -34,7 +34,10 @@ from logic_cad.core.model.constants import (
     A4_LANDSCAPE_WIDTH_MM,
 )
 from logic_cad.core.model.layout_entity_layer_policy import is_hidden_for_passive_layout_primitive
-from logic_cad.core.text.layout_resolver import apply_render_context_fonts_for_pdf_like_ui
+from logic_cad.core.text.layout_resolver import (
+    apply_render_context_fonts_for_pdf_like_ui,
+    decode_dxf_unicode_escapes,
+)
 from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, ensure_standard_linetypes
 from logic_cad.core.services.layout_service import LayoutService
 
@@ -121,6 +124,47 @@ class _PdfExportFrontend(Frontend):
             entities,
             filter_func=self._layout_entity_filter,
         )
+
+    @staticmethod
+    def _decoded_text_entity(entity: DXFGraphic) -> DXFGraphic:
+        """Return a copied text entity with DXF unicode escapes decoded.
+
+        The original entity in *doc* must stay unchanged because export should not
+        mutate drawing data.
+        """
+
+        dt = str(entity.dxftype()).upper()
+        if dt not in {"TEXT", "ATTRIB", "ATTDEF", "MTEXT"}:
+            return entity
+        try:
+            cloned = entity.copy()
+        except Exception:
+            return entity
+        try:
+            if dt == "MTEXT":
+                cloned.text = decode_dxf_unicode_escapes(str(getattr(cloned, "text", "") or ""))
+                return cloned
+            if dt == "ATTDEF":
+                raw_tag = str(getattr(cloned.dxf, "tag", "") or "")
+                if raw_tag:
+                    cloned.dxf.tag = decode_dxf_unicode_escapes(raw_tag)
+                if hasattr(cloned.dxf, "text"):
+                    raw_text = str(getattr(cloned.dxf, "text", "") or "")
+                    if raw_text:
+                        cloned.dxf.text = decode_dxf_unicode_escapes(raw_text)
+                return cloned
+            raw = str(getattr(cloned.dxf, "text", "") or "")
+            if raw:
+                cloned.dxf.text = decode_dxf_unicode_escapes(raw)
+            return cloned
+        except Exception:
+            return entity
+
+    def draw_text_entity(self, entity: DXFGraphic, properties) -> None:
+        super().draw_text_entity(self._decoded_text_entity(entity), properties)
+
+    def draw_mtext_entity(self, entity: DXFGraphic, properties) -> None:
+        super().draw_mtext_entity(self._decoded_text_entity(entity), properties)
 
 
 def _paper_size_inches_from_layout(layout: Layout) -> tuple[float, float]:

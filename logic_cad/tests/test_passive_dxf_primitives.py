@@ -14,6 +14,7 @@ from logic_cad.core.model.constants import (
     LAYER_CONTENTS_AREA,
     LAYER_FRAME,
     LAYER_PORT,
+    LAYER_WIRE_COM,
     LAYER_WIRE_LOGIC,
 )
 from logic_cad.core.model.layout_entity_layer_policy import is_hidden_for_passive_layout_primitive
@@ -101,6 +102,8 @@ def test_should_add_false_hidden_layers() -> None:
     assert not should_add_passive_primitive(ent)
     ent2 = blk.add_line((0, 0), (10, 5), dxfattribs={"layer": LAYER_CONTENTS_AREA})
     assert not should_add_passive_primitive(ent2)
+    ent3 = blk.add_line((0, 0), (10, 5), dxfattribs={"layer": LAYER_WIRE_COM})
+    assert not should_add_passive_primitive(ent3)
 
 
 def test_pdf_export_entity_filter_matches_layer_policy() -> None:

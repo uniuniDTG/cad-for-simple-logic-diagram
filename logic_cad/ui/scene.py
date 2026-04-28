@@ -47,6 +47,7 @@ from logic_cad.core.model.constants import (
     LAYER_CONTENTS_AREA,
     LAYER_FRAME,
     LAYER_VPORT,
+    LAYER_WIRE_COM,
     LINETYPE_CONTINUOUS,
     LINETYPE_LOGIC,
     PEER_UID_XDATA,
@@ -864,6 +865,8 @@ class DiagramScene(QGraphicsScene):
                 if not lt:
                     lt = LINETYPE_LOGIC
                 st = entity_stroke_qcolor(self._diagram.doc, e)
+                if str(e.dxf.layer).strip().upper() == LAYER_WIRE_COM.upper():
+                    st.setAlpha(0)
                 wi = WireItem(uid, pts, broken=broken, linetype=lt, stroke_color=st)
                 self.addItem(wi)
             if e.dxftype() == "LWPOLYLINE" and is_wire_layer(str(e.dxf.layer)) and get_type(e) == ENTITY_TYPE_WIRE_ARROW:
@@ -876,6 +879,8 @@ class DiagramScene(QGraphicsScene):
                 if not lt_a:
                     lt_a = LINETYPE_LOGIC
                 st_a = entity_stroke_qcolor(self._diagram.doc, e)
+                if str(e.dxf.layer).strip().upper() == LAYER_WIRE_COM.upper():
+                    st_a.setAlpha(0)
                 self.addItem(WireArrowItem(pts_xy, linetype=lt_a, stroke_color=st_a))
             if e.dxftype() == "LWPOLYLINE" and e.dxf.layer in (LAYER_FRAME, LAYER_VPORT):
                 pts: list[tuple[float, float]] = []

@@ -6,12 +6,13 @@ structure so each renderer can focus on drawing, not DXF semantic parsing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 from pathlib import Path
 import re
+from dataclasses import dataclass
 from typing import Any
 
+import ezdxf
 from ezdxf.entities import DXFEntity
 from ezdxf.fonts import fonts
 from ezdxf.lldxf.validator import make_table_key as _dxf_style_table_key
@@ -332,6 +333,26 @@ def _font_family_from_entity(entity: DXFEntity) -> str:
     return font_family_preferred_for_named_style(doc, style_name)
 
 
+def decode_dxf_unicode_escapes(text: str) -> str:
+    """Decode DXF unicode escapes like ``\\U+3042`` to Unicode characters.
+
+    Args:
+        text: Raw text content potentially containing DXF unicode escapes.
+
+    Returns:
+        Text with DXF unicode escapes decoded where possible.
+    """
+
+    s = str(text or "")
+    try:
+        if ezdxf.has_dxf_unicode(s):
+            return ezdxf.decode_dxf_unicode(s)
+    except Exception:
+        # Keep compatibility with older ezdxf behavior by falling back to local decode.
+        pass
+    return _decode_dxf_unicode_escapes(s)
+
+
 def normalize_newlines(text: str) -> str:
     """Normalize DXF MTEXT/TEXT line separators to LF.
 
@@ -343,7 +364,7 @@ def normalize_newlines(text: str) -> str:
     """
 
     t = str(text or "")
-    t = _decode_dxf_unicode_escapes(t)
+    t = decode_dxf_unicode_escapes(t)
     return t.replace("\\P", "\n").replace("\r\n", "\n").replace("\r", "\n")
 
 

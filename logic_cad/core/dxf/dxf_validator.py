@@ -14,7 +14,7 @@ from logic_cad.core.pages.page_order import validate_paper_layout_name
 if TYPE_CHECKING:
     from ezdxf.document import Drawing
 
-_PORT_LAYER_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI)$")
+_PORT_LAYER_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI|COM)$")
 
 
 def _validate_block_port_definitions(doc: Drawing) -> list[str]:

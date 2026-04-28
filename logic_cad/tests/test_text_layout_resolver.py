@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication
 from logic_cad.core.text.layout_resolver import (
     apply_render_context_fonts_for_pdf_like_ui,
     build_single_line_layout,
+    decode_dxf_unicode_escapes,
     font_family_candidates,
     font_family_preferred_for_style_table_key,
     normalize_dxf_text_entity,
@@ -191,6 +192,12 @@ def test_normalize_mtext_preserves_height_width_and_attachment() -> None:
     assert layout.attachment_point == 1
     assert layout.halign == 0
     assert layout.valign == 3
+
+
+def test_decode_dxf_unicode_escapes_decodes_u_plus_sequence() -> None:
+    """DXF special unicode escape should decode to actual character."""
+
+    assert decode_dxf_unicode_escapes(r"\U+3042abc") == "あabc"
 
 
 def test_build_single_line_layout_for_user_text_defaults() -> None:

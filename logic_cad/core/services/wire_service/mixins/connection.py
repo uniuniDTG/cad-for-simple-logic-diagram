@@ -267,6 +267,7 @@ class WireServiceConnectionMixin:
             )
         else:
             self.recompute_all_bridges_ordered(layout_name)
+        self.refresh_com_wire_markers(layout_name)
         return uid
 
     def connect_ports(
@@ -325,6 +326,7 @@ class WireServiceConnectionMixin:
             self.optimize_and_or_input_ports(
                 index, layout_name, dst_uid, routing_profile=_GATE_CONNECT_OPTIMIZE_PROFILE
             )
+            self.refresh_com_wire_markers(layout_name)
             return uid
         logic_cad_log_separator(
             f"connect_ports route layout={layout_name!r} src UUID={format_uid_display(src_uid)} "
@@ -360,6 +362,7 @@ class WireServiceConnectionMixin:
         }
         set_entity_xdata(lw, build_ld_app_tags("1", uid, "WIRE", extra))
         self.recompute_all_bridges_ordered(layout_name)
+        self.refresh_com_wire_markers(layout_name)
         return uid
 
     def reroute_wires_touching(

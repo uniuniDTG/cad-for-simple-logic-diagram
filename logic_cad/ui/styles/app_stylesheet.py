@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-APP_STYLESHEET = """
+from pathlib import Path
+
+
+def _asset_uri(filename: str) -> str:
+    """Return an absolute stylesheet asset path in POSIX form."""
+    return (Path(__file__).resolve().parent / "assets" / filename).as_posix()
+
+
+_CHECKBOX_UNCHECKED_URI = _asset_uri("checkbox_unchecked.svg")
+_CHECKBOX_CHECKED_URI = _asset_uri("checkbox_checked.svg")
+
+
+_APP_STYLESHEET_TEMPLATE = """
 QMainWindow, QWidget { background-color: #252830; color: #d8d8dc; font-family: "Segoe UI", sans-serif; font-size: 9pt; }
 
 QStatusBar {
@@ -76,6 +88,34 @@ QPushButton {
 QPushButton:hover { background-color: #3a5e8a; border-color: #4a78a8; }
 QPushButton:pressed { background-color: #1e3a5a; }
 QPushButton:disabled { background-color: #2a2c30; color: #606470; border-color: #303540; }
+
+QCheckBox {
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #4a5060;
+    border-radius: 2px;
+    background-color: #1e2026;
+    image: url("__CHECKBOX_UNCHECKED_URI__");
+}
+QCheckBox::indicator:hover {
+    border-color: #6a7084;
+    background-color: #242832;
+}
+QCheckBox::indicator:checked {
+    border-color: #0d5f78;
+    background-color: #007aa0;
+    image: url("__CHECKBOX_CHECKED_URI__");
+}
+QCheckBox::indicator:disabled {
+    border-color: #303540;
+    background-color: #1a1c20;
+}
+QCheckBox::indicator:checked:disabled {
+    background-color: #2a4a58;
+}
 
 QWidget#paletteColumn QPushButton#wireToolAuto,
 QWidget#paletteColumn QPushButton#wireToolManual {
@@ -251,3 +291,8 @@ QProgressBar {
 }
 QProgressBar::chunk { background-color: #3a8ab8; border-radius: 1px; }
 """.strip()
+
+APP_STYLESHEET = (
+    _APP_STYLESHEET_TEMPLATE.replace("__CHECKBOX_UNCHECKED_URI__", _CHECKBOX_UNCHECKED_URI)
+    .replace("__CHECKBOX_CHECKED_URI__", _CHECKBOX_CHECKED_URI)
+)

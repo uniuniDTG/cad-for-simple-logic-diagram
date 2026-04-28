@@ -18,6 +18,9 @@ from logic_cad.core.model.constants import (
     BLOCK_WIRE_BRANCH,
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_INPAGE_REF,
+    PAGE_REF_SHOW_PAGE_DESC_XDATA,
+    PAGE_REF_SHOW_PAGE_NAME_XDATA,
+    PAGE_REF_SHOW_TARGET_INFO_XDATA,
     ENTITY_TYPE_WIRE_BRANCH,
     INPAGE_SYM_HEIGHT_MM,
     INPAGE_SYM_HEIGHT_XDATA,
@@ -248,7 +251,17 @@ class SymbolService:
             ins.dxf.yscale = scale
             ins.dxf.zscale = scale
         uid = new_uid()
-        tags = build_ld_app_tags("1", uid, "PAGE_REF", {TARGET_LAYOUT_XDATA: target_layout, "sym": sym})
+        tags = build_ld_app_tags(
+            "1",
+            uid,
+            "PAGE_REF",
+            {
+                TARGET_LAYOUT_XDATA: target_layout,
+                "sym": sym,
+                PAGE_REF_SHOW_PAGE_NAME_XDATA: "0",
+                PAGE_REF_SHOW_PAGE_DESC_XDATA: "0",
+            },
+        )
         set_entity_xdata(ins, tags)
         if self._block_has_attdef(bname, "SYM"):
             try:
@@ -356,7 +369,30 @@ class SymbolService:
             raise ValueError("ページ参照（PAGE_REF）ではありません。")
         prev = read_ld_app_dict(ins)
         uid_str = prev.get("uid") or get_uid(ins)
-        tags = build_ld_app_tags("1", uid_str, "PAGE_REF", {TARGET_LAYOUT_XDATA: target_layout, "sym": prev.get("sym", "")})
+        extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
+        extra[TARGET_LAYOUT_XDATA] = target_layout
+        extra["sym"] = prev.get("sym", "")
+        tags = build_ld_app_tags("1", uid_str, "PAGE_REF", extra)
+        set_entity_xdata(ins, tags)
+        refresh_page_ref_syms_on_layout(self.doc, layout_name)
+
+    def set_page_ref_target_info_visibility(
+        self, layout_name: str, uid: str, *, show_page_name: bool, show_page_desc: bool
+    ) -> None:
+        ins = self.insert_by_uid(layout_name, uid)
+        if ins is None:
+            raise ValueError("INSERT が見つかりません。")
+        if get_type(ins) != "PAGE_REF":
+            raise ValueError("ページ参照（PAGE_REF）ではありません。")
+        prev = read_ld_app_dict(ins)
+        uid_str = prev.get("uid") or get_uid(ins)
+        if not uid_str:
+            raise ValueError("INSERT に uid がありません。")
+        extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
+        extra.pop(PAGE_REF_SHOW_TARGET_INFO_XDATA, None)
+        extra[PAGE_REF_SHOW_PAGE_NAME_XDATA] = "1" if show_page_name else "0"
+        extra[PAGE_REF_SHOW_PAGE_DESC_XDATA] = "1" if show_page_desc else "0"
+        tags = build_ld_app_tags("1", uid_str, "PAGE_REF", extra)
         set_entity_xdata(ins, tags)
         refresh_page_ref_syms_on_layout(self.doc, layout_name)
 
