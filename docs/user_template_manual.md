@@ -1,53 +1,15 @@
-# Logic CAD ユーザーマニュアル（テンプレート DXF 含む）
+# Logic CAD テンプレート DXF マニュアル
 
-論理回路図エディタは **ezdxf の Drawing を唯一のデータソース**とします。図面そのものは通常「アプリで新規作成 → 上書き保存」で得られる `.dxf` です。本書では、**ライブラリ用・図枠用のテンプレート DXF**を自分で用意する方法を中心に説明します。
+論理回路図エディタは **ezdxf の Drawing(dxf構造) を唯一のデータソース**とします。
+
+図面そのものは通常「アプリで新規作成 → 上書き保存」で得られる `.dxf` です。
+
+本書では、**ライブラリ用・図枠用のテンプレート DXF**を自分で用意する方法を中心に説明します。
 
 ---
 
 ## 1. 起動・基本操作
-
-```text
-python -m logic_cad.app.main
-```
-
-（推奨）仮想環境を有効化したうえで、プロジェクトルートから実行してください。
-
-**デバッグ:** 標準出力に `[logic_cad:…]` ログを出すには **`--debug`** または環境変数 **`LOGIC_CAD_DEBUG=1`**。ルーティングの**大量ログ**はさらに **`LOGIC_CAD_DEBUG_ROUTING_VERBOSE=1`** が必要（デバッグ有効時のみ効く）。CLI 引数と各環境変数の一覧は **[開発者向け](developer.md)** を参照。
-
-| 操作 | 内容 |
-|------|------|
-| パレットからドラッグ＆ドロップ | シンボル配置（ライブラリに登録された BLOCK 名） |
-| シンボルドラッグ | 移動（離すと DXF の INSERT 座標が更新） |
-| **ポート上をクリック** | 配線開始 → もう一方のポートで確定（Ctrl は不要） |
-| **配線プレビュー中** | カーソル付近に長さ（mm）。手動配線はプレビュー上のマンハッタン累積、自動配線は始点ポートからマウスまでの直線距離 |
-| **Ctrl + クリック（ページ跨ぎシンボルの本体・ポート以外）** | リンク先ページへ切替 |
-| **Esc** | 配線の仮想線キャンセル、注釈（図形）の途中入力キャンセル |
-| ホイール | カーソル位置を中心にズーム |
-| 中ボタンドラッグ | パン |
-| **Ctrl+Z / Ctrl+Y** | Undo / Redo |
-| **Ctrl+C / Ctrl+V** | **シンボル**のコピー／貼り付け（複数選択可）。**両端が選択内にある配線**もまとめて複製。図枠・目次行などはコピー対象外。貼り付け位置の基準はキャンバス上の**直近のマウス位置**（無ければ表示領域の中心）。 |
-| Delete | 選択の削除 |
-| 左端「ページ」タブ・一覧 | ページ切替。各行は **`[レイアウト名] 説明`**（`page_desc` が空なら「（説明なし）」）。補足はツールチップ。右クリックで **ページ追加**（タブ名・改訂・説明）、**プロパティ**、**ページを複製…**（用紙内容・配線・注釈を別レイアウト名で複製。目次用レイアウト `0` / `0A` …は不可）、**ページを削除…**、**目次の再生成**。 |
-
-**Edit**: **コピー**／**貼り付け**（上記シンボル＋内部配線）もここから実行できます。
-
-**File**: New / Open / Save / Save As — いずれも DXF が対象です。**PDF にエクスポート…** は、先に **PDF 書き出し設定**（現状は「白黒で出力」の有無）を選び、続けて保存先を指定して全用紙を 1 つの PDF にまとめます（幾何はメモリ上の DXF を ezdxf の描画パイプラインで出力）。**ページ用のメニューはありません**（上記パネルから操作します）。
-
-### 注釈（図形）ツール
-
-左パネル（パレット上）の **直線 / 円 / テキスト** アイコンボタンは、**現在の用紙レイアウト**上にユーザー描画の `LINE`・`CIRCLE`・`TEXT` を追加します（レイヤ **`LD_ANNOTATION`**、`LD_APP` の種別は `USER_LINE` / `USER_CIRCLE` / `USER_TEXT`）。**自動配線・手動配線と同時には使えません**（一方をオンにすると他方はオフになります）。アクティブなツールは **水色の枠**で表示されます。
-
-- **直線・円**: グリッドにスナップ。直線の 2 点目は **Shift** で水平／垂直（長い軸側）に拘束。新規は既定で実線（`CONTINUOUS`）。
-- **テキスト**: クリックでダイアログから文字列入力し配置（位置はスナップなし）。新規の文字高さは既定 **4 mm**。
-- **線種・文字・高さの変更**: オブジェクトをクリックして選択し、右側 **プロパティ** で編集して **適用**（直線・円は `CONTINUOUS` / `DASHED` / `CENTER`）。
-- 選択して **Delete** で削除。描画・プロパティ変更は既存の **Undo** に含まれます。
-
-### PDF と日本語表示（□ について）
-
-- **PDF**: エクスポート時、システムに見つかる日本語対応フォントへフォールバックしてグリフを描画します。ポート用レイヤ（`LD_PORT` / `LD_PORT_…`）上の図形は PDF には含めません（編集用の接続点のため）。
-- **BricsCAD など他 CAD で □ になる場合**: DXF の **テキストスタイル（STYLE）が参照しているフォント**に CJK グリフが無いことが多いです。PDF のフォールバックだけでは CAD 上の表示は変わりません。図枠テンプレートや CAD 側でスタイルのフォントを日本語対応の TrueType に合わせてください。
-
----
+- ユーザ向けマニュアル: [`user_operation_manual.md`](user_operation_manual.md)  参照のこと。
 
 ## 2. アプリが読み込む DXF の種類
 
@@ -58,9 +20,6 @@ python -m logic_cad.app.main
 【起動時にマージするアセット（任意・推奨）】
   logic_cad/assets/symbol_library.dxf   … 固定シンボルの BLOCK 定義
   logic_cad/assets/frame_template.dxf      … 図枠テンプレ（任意・新規ページ時に `generate/` より先に検索）
-
-【開発用サンプル（アセットは上書きしない）】
-  generate/frame_template.py → generate/frame_template.dxf（A4 横。§4-3）
 
 【存在しなければ】
   symbol_library.dxf が無い → NOT スタブと PAGE_TO / PAGE_FROM だけ自動生成
@@ -100,8 +59,8 @@ logic_cad/assets/symbol_library.dxf
 POINT を**接続端子**として使います。レイヤ名は次の形式です。
 
 ```text
-LD_PORT_IN{番号}_{LOGIC|VALUE|MULTI}
-LD_PORT_OUT{番号}_{LOGIC|VALUE|MULTI}
+LD_PORT_IN{番号}_{LOGIC|VALUE|COM|MULTI}
+LD_PORT_OUT{番号}_{LOGIC|VALUE|COM|MULTI}
 ```
 
 例:
@@ -189,7 +148,7 @@ doc.saveas("logic_cad/assets/symbol_library.dxf")
 
 いずれも無い、またはコピー後も **`LD_VPORT` 上の VPORT 矩形が無い**場合でも、アプリは **図枠・VPORT を自動では追加しません**（テンプレまたは CAD で用意してください）。
 
-`import_frame_template(doc, layout_name, path=None)` を直接呼ぶこともでき、戻り値はコピーしたエンティティ数です。ログ: `LOGIC_CAD_DEBUG_SYMLIB=1` で `[symlib] frame_template: ...`、`LOGIC_CAD_DEBUG=1` で `[logic_cad:frame] ...`。
+`import_frame_template(doc, layout_name, path=None)` を直接呼ぶこともでき、戻り値はコピーしたエンティティ数です。ログ: `LOGIC_CAD_DEBUG_SYMLIB=1` で `symlib` ログ、`--debug`（または root logger `INFO` 以下）で `logic_cad.frame` ログが出ます。
 
 テンプレの作り方は次のとおりです。
 
@@ -209,7 +168,7 @@ doc.saveas("logic_cad/assets/symbol_library.dxf")
 
 標準の `generate/frame_template.py` は **上記ブロック＋modelspace の INSERT 1 つ**を**例として**出力します（座標は CAD で自由に変更可）。**新規図面**の初回のみ `frame_template.dxf` を取り込みます。**保存済み DXF を Open** したときは、**ファイル内の枠をそのまま**使います（起動時の検索パスだけでは上書きしません）。
 
-**図枠の差し替え（エディタ）:** メニュー **テンプレート** → **図枠テンプレートを適用…** で任意の `.dxf` を選ぶと、**全用紙ページ**について `LD_PAPER_FRAME` 等のブロック定義と、各ページにコピーされている図枠・目次ガイドを**置き換え**ます（`generate/frame_template.py` と**同系のブロック名・構造**を推奨）。**目次グリッド**は適用後に再生成されます。検証用に **`python generate/frame_template2.py`** で英語ラベル版の `generate/frame_template2.dxf` を出力できます（既定のテンプレ検索順には含めません。適用ダイアログでファイルを指定してください）。
+**図枠の差し替え（エディタ）:** メニュー **テンプレート** → **図枠テンプレートを適用…** で任意の `.dxf` を選ぶと、**全用紙ページ**について `LD_PAPER_FRAME` 等のブロック定義と、各ページにコピーされている図枠・目次ガイドを**置き換え**ます
 
 **ページの一意な識別子は ezdxf の用紙レイアウト名（CAD のタブ名）だけ**です。名前は **ASCII の英数字とアンダースコア**（`^[A-Za-z0-9_]+$`）にしてください。
 
@@ -218,35 +177,6 @@ doc.saveas("logic_cad/assets/symbol_library.dxf")
 **目次用紙のレイアウト名:** **`0`**（定数 `TOC_LAYOUT_NAME`）、続くシートは **`0A`**、**`0B`**、… とします（予約パターン `^0[A-Z]*$`）。通常の用紙名はこのパターンに当てないでください。ページリンク（PAGE_REF）のリンク先は XDATA キー **`target_layout`** に **対象レイアウト名**を格納します。
 
 外部 CAD でだけ図面を作る場合は、**後からアプリで開いて検証**することを推奨します。
-
-### 4-3. サンプル生成（`generate/`）
-
-**生成スクリプト**は `logic_cad/assets` を触らず、リポジトリ直下の **`generate/`** に出力します（既存アセットの上書きを避けるため）。
-
-```bash
-python generate/frame_template.py
-```
-
-出力: `generate/frame_template.dxf`（A4 横 297×210 mm、**図枠は用紙左下 (0,0)〜右上**、`LD_PAPER_FRAME` ブロック＝`LD_FRAME` の外枠＋**`LD_FRAME_TEXT` の ATTDEF ×4**、**`CONTENTS_HEADER` / `CONTENTS_ROW`**、**`LD_CONTENTS_AREA`** の閉じた矩形、modelspace に **`type:PAPER_FRAME` の INSERT**）。サンプルには **`LD_VPORT` は含めません**。**挿入単位は mm**（`$INSUNITS` = 4）です。
-
-開き直し・新規ページ時はレイアウトの **用紙サイズを A4 横に設定**し、余白を 0 にそろえ、**メイン用の用紙ビューポート（VIEWPORT 実体）を 1 本だけ残し**、画層 **`VIEWPORTS` に載せてその画層をオフ**にします（枠が見えないようにするため。CAD 互換のため実体は残します）。**ビューポート枠のプロット**もオフにします。あわせて、用紙空間に残りがちな **レイヤ `0` の 237.6×168 mm 前後の矩形**（A4 横の約 80%＝各辺 10% 相当の印刷域ガイド）を削除します。DXF 標準の **レイヤ `0` 自体は必須**ですが、新規図面は寸法矢印用の補助ブロックを増やさない設定にしています。
-
-`assets` に置けば **検索順が先**になります。別パスだけ使う場合は `import_frame_template(..., path=Path(...))` で明示してください。
-
-### 4-4. 多ページ確認用 DXF（`generate/many_pages_dxf.py`）
-
-**目的:** 左端の **ページ一覧**、**タブ順**、**目次**、**図枠の `PAGE_DESC` / `PAGE_REV`** など、枚数が多いときの動作を手元で試すための DXF を、リポジトリルートからワンコマンドで作ります（本番図面ではなく検証専用）。
-
-**実行例:**
-
-```bash
-python generate/many_pages_dxf.py
-python generate/many_pages_dxf.py 120 -o C:/temp/many.dxf
-```
-
-- **既定:** 用紙レイアウト **100** 枚。1 枚目は **`Layout1`**、追加は **`P2`** … **`P100`**（枚数を変えれば最後の名前が変わります）。
-- **出力既定:** `generate/many_pages_test.dxf`（`-o` / `--output` で変更可）。
-- **説明・改訂:** 各用紙レイアウトの LAYOUT XDATA に、**`page_desc`**（例: 「確認用 P5：全100枚中5枚目。一覧・図枠・目次表示のテスト」）と **`page_rev`**（10 枚ごとに `"1"`, `"2"`, … と増えるサンプル）を自動で入れます。エディタのページ行の **説明**列や、§4-2 の図枠・目次プレースホルダと対応する表示の確認に使えます。
 
 ---
 
@@ -287,7 +217,7 @@ python generate/many_pages_dxf.py 120 -o C:/temp/many.dxf
 正規表現で解釈されます（`logic_cad.core.model.index_store` と同じ）:
 
 ```text
-LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|MULTI)
+LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|COM|MULTI)
 ```
 
 - 例: `LD_PORT_IN0_LOGIC`, `LD_PORT_OUT0_LOGIC`
@@ -313,24 +243,3 @@ LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|MULTI)
 | ポートに繋がらない | POINT のレイヤ名が `LD_PORT_IN*_LOGIC` 等の規則か |
 | NOT が無いと言われる | ライブラリに `NOT` ブロックを追加するか、アプリのスタブに任せる |
 | インポートエラー | DXF バージョン・破損、`Importer` の制約。別名でブロックを分割して再保存 |
-
----
-
-## 8. 関連ファイル（開発者向け）
-
-| パス | 役割 |
-|------|------|
-| `logic_cad/core/logic_diagram.py` | 編集 API のファサード（`LogicDiagram`） |
-| `logic_cad/core/services/layout_service.py` | `import_symbol_library` / `reload_symbol_library` / `import_frame_template` / `apply_frame_template_from_path` / ページ初期化 |
-| `logic_cad/core/model/constants.py` | レイヤ名・グリッド・ルーティング定数など |
-| `logic_cad/core/model/index_store.py` | UID／ポート／ワイヤのインデックス、ポートレイヤ名の正規表現 |
-| `logic_cad/core/model/xdata.py` | `LD_APP` / UUID |
-| `logic_cad/core/pages/` | 用紙レイアウト名順・ページメタ・`PAGE_REF`・目次グリッド幾何 |
-| `logic_cad/core/dxf/dxf_repository.py` | 新規／読込／保存・標準レイヤ |
-| `logic_cad/core/undo/` | Undo／Redo 用のデルタとエンティティのシリアライズ |
-| `logic_cad/tests/test_symbol_library_import.py` | ライブラリ取り込みの自動テスト |
-| [`developer.md`](developer.md) | `--debug`・`LOGIC_CAD_*`・ルーティング試験用 env |
-
----
-
-更新日: レイヤ／ATTDEF 仕様は `logic_cad/core/model/constants.py` と `logic_cad/core/model/index_store.py` のポート正規表現と併せて確認してください。

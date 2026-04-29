@@ -879,8 +879,7 @@ class DiagramScene(QGraphicsScene):
                 if not lt_a:
                     lt_a = LINETYPE_LOGIC
                 st_a = entity_stroke_qcolor(self._diagram.doc, e)
-                if str(e.dxf.layer).strip().upper() == LAYER_WIRE_COM.upper():
-                    st_a.setAlpha(0)
+                # COM base wire centerline is hidden, but arrowheads must remain visible.
                 self.addItem(WireArrowItem(pts_xy, linetype=lt_a, stroke_color=st_a))
             if e.dxftype() == "LWPOLYLINE" and e.dxf.layer in (LAYER_FRAME, LAYER_VPORT):
                 pts: list[tuple[float, float]] = []

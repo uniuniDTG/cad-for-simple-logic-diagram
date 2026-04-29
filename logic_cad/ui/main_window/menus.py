@@ -92,6 +92,9 @@ def build_template_menu(w: QMainWindow) -> None:
 
 def build_view_menu(w: QMainWindow) -> None:
     m_view = w.menuBar().addMenu("表示")
+    a_log = QAction("ログ…", w)
+    a_log.triggered.connect(w._show_log_window)  # type: ignore[attr-defined]
+    m_view.addAction(a_log)
     a_lib = QAction("シンボル一覧…", w)
     a_lib.triggered.connect(w._show_symbol_library)  # type: ignore[attr-defined]
     m_view.addAction(a_lib)

@@ -94,7 +94,7 @@ def resolve_manual_href_to_target(base_file: Path, href: str) -> tuple[Path, str
 
     Args:
         base_file: The ``.md`` file currently displayed.
-        href: Raw ``href`` (e.g. ``user_manual.md``, ``../logic_cad/x.py``, ``#anchor``).
+        href: Raw ``href`` (e.g. ``user_template_manual.md``, ``../logic_cad/x.py``, ``#anchor``).
 
     Returns:
         ``(resolved_absolute_path, fragment_or_none)``. For same-document links (``#a`` or empty

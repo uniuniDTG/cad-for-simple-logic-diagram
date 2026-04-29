@@ -92,7 +92,7 @@ def _log_vertical_parallel_overlap_diagnosis(
     gate_uid: str,
     overlap_count_all: int,
 ) -> None:
-    """LOGIC_CAD_DEBUG_ROUTING_VERBOSE=1 のとき、縦並行辺の診断を詳細ログ。"""
+    """root logger が DEBUG のとき、縦並行辺の診断を詳細ログ。"""
     if not logic_cad_debug_routing_verbose():
         return
     n = len(pts_list)

@@ -62,8 +62,8 @@ def test_resolve_manual_href_to_target_sibling_md(tmp_path: Path) -> None:
     docs.mkdir()
     base = docs / "developer.md"
     base.write_text("x", encoding="utf-8")
-    target, frag = resolve_manual_href_to_target(base, "user_manual.md")
-    assert target == (docs / "user_manual.md").resolve()
+    target, frag = resolve_manual_href_to_target(base, "user_template_manual.md")
+    assert target == (docs / "user_template_manual.md").resolve()
     assert frag is None
 
 
@@ -82,7 +82,7 @@ def test_resolve_manual_href_to_target_parent_path(tmp_path: Path) -> None:
 def test_resolve_manual_href_to_target_fragment_only(tmp_path: Path) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
-    base = docs / "user_manual.md"
+    base = docs / "user_template_manual.md"
     base.write_text("x", encoding="utf-8")
     target, frag = resolve_manual_href_to_target(base, "#debug")
     assert target == base.resolve()
@@ -103,5 +103,5 @@ def test_directory_base_url_resolves_relative_href(tmp_path: Path) -> None:
     d = tmp_path / "docs"
     d.mkdir()
     base = directory_base_url(d)
-    resolved = base.resolved(QUrl("user_manual.md"))
-    assert Path(resolved.toLocalFile()) == (d / "user_manual.md").resolve()
+    resolved = base.resolved(QUrl("user_template_manual.md"))
+    assert Path(resolved.toLocalFile()) == (d / "user_template_manual.md").resolve()

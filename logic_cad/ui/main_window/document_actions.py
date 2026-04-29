@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from logic_cad.core.logic_diagram import LogicDiagram
+from logic_cad.core.model.constants import APP_DISPLAY_NAME, APP_DISPLAY_NAME_WITH_VERSION
 from logic_cad.core.pages.page_layout_meta import (
     read_drawing_number,
     read_drawing_page_start,
@@ -29,23 +30,41 @@ if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
 
 
-def update_window_title(win: MainWindow) -> None:
-    dn = read_drawing_number(win._diagram.doc).strip()
-    common = dn if dn else "（図面番号なし）"
-    p = win._diagram.path
+def build_window_title(*, drawing_number: str, diagram_path: str | None, is_dirty: bool) -> str:
+    """Build the main window title text.
+
+    Args:
+        drawing_number: Drawing number metadata from the current document.
+        diagram_path: Diagram file path (None when unsaved).
+        is_dirty: True when the document has unsaved changes.
+
+    Returns:
+        Window title text with product version, drawing number and path.
+    """
+    common = drawing_number.strip() if drawing_number.strip() else "（図面番号なし）"
     try:
-        path_s = str(Path(p).resolve()) if p else "未保存"
+        path_s = str(Path(diagram_path).resolve()) if diagram_path else "未保存"
     except OSError:
-        path_s = str(p) if p else "未保存"
-    star = "*" if win._diagram.is_dirty() else ""
-    win.setWindowTitle(f"{star}Logic CAD {common} - {path_s}")
+        path_s = str(diagram_path) if diagram_path else "未保存"
+    star = "*" if is_dirty else ""
+    return f"{star}{APP_DISPLAY_NAME_WITH_VERSION} {common} - {path_s}"
+
+
+def update_window_title(win: MainWindow) -> None:
+    win.setWindowTitle(
+        build_window_title(
+            drawing_number=read_drawing_number(win._diagram.doc),
+            diagram_path=win._diagram.path,
+            is_dirty=win._diagram.is_dirty(),
+        )
+    )
 
 
 def prompt_save_if_dirty(win: MainWindow) -> bool:
     if not win._diagram.is_dirty():
         return True
     mb = QMessageBox(win)
-    mb.setWindowTitle("Logic CAD")
+    mb.setWindowTitle(APP_DISPLAY_NAME)
     mb.setText("変更が保存されていません。保存しますか？")
     mb.setIcon(QMessageBox.Icon.Question)
     mb.setStandardButtons(
@@ -117,7 +136,7 @@ def save_document(win: MainWindow) -> None:
         save_document_as(win)
         return
     try:
-        win._diagram.save()
+        _issues = win._diagram.save()
     except Exception as ex:
         QMessageBox.warning(win, "保存", str(ex))
         return
@@ -129,7 +148,7 @@ def save_document_as(win: MainWindow) -> None:
     if not path:
         return
     try:
-        win._diagram.save(path)
+        _issues = win._diagram.save(path)
     except Exception as ex:
         QMessageBox.warning(win, "保存", str(ex))
         return

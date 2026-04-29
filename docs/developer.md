@@ -6,7 +6,7 @@
 - シンボルライブラリ: `logic_cad/core/debug/debug_symlib.py`（`symlib_log`）；再読み込み API は `logic_cad/core/services/layout_service.py`（`reload_symbol_library`）
 - 新規図面の先頭紙レイアウト名: `logic_cad/core/model/constants.py` の `FIRST_PAGE_NAME`（`LogicDiagram.new` が ezdxf 既定の1枚目をこの名前へリネーム。既存 DXF を開いたときはファイル内の名前のまま）
 - 図枠テンプレートの明示パス適用・置き換え: `logic_cad/core/services/layout_service.py`（`apply_frame_template_from_path`）
-- 目次（TOC）フォールバック: `logic_cad/core/services/toc_frame_service.py`（`[logic_cad:toc]`、`LOGIC_CAD_DEBUG=1` 時）
+- 目次（TOC）フォールバック: `logic_cad/core/services/toc_frame_service.py`（`--debug` か root logger が `INFO` 以下のとき）
 - ステータスバー: キャンバス上のカーソル位置を DXF 図面座標 (mm) で表示。シーン座標は `dxf_from_scene_pos`（`logic_cad/ui/snap_utils.py`）で mm に変換
 - 起動引数: `logic_cad/app/main.py`
 - ルーティングプロファイルの env 上書き: `logic_cad/core/routing/profile.py`（`apply_routing_env_overrides`）
@@ -16,6 +16,7 @@
 - ユーザー直線ツール: ツールバーの直線ボタンを右クリックすると、次に描く線の線種（CONTINUOUS / DASHED / CENTER）を選べる。状態は `DiagramScene` の `user_sketch_line_default_linetype` / `set_user_sketch_line_default_linetype`
 - 文字列の検索・置換: `logic_cad/core/services/text_find_replace.py`（`TextSearchHit` / `list_text_search_hits`、対象は `SYM` / `LABEL*` と `USER_TEXT` 等）。`logic_cad/ui/text_search_navigate.py`（`apply_text_search_hit`）。UI: `find_replace_dialog.py`、Ctrl+F で**非モーダル**検索（前検索 / 次検索 / キャンセル、F3 / Shift+F3、パネル非表示時もメインにフォーカスがあれば可）。**検索語と各オプションは図面に保存されない**（セッション内の UI メモリのみ）。Ctrl+R はモーダル置換
 - **アプリのユーザ設定（図面外）**: **ファイル** → **ユーザ設定…**。永続化は `logic_cad/ui/app_user_settings.py` の `QSettings`（**Ini 形式**）。起動時に `logic_cad/app/main.py` で `QApplication.setOrganizationName("LogicCAD")` / `setApplicationName("Logic CAD")` を設定しているため、保存先は OS の既定ユーザ設定ディレクトリ配下の `.ini`（例: Windows では `%LOCALAPPDATA%` 系。実際のパスは実行時に `QSettings.fileName()` で確認可能）。クロスヘアは `DiagramView` がビューポート座標でオーバーレイ描画（`none` / `full` / `local`）。**レガシー Ini の `mode=both` は読み込み時に `full` として扱う**（保存はされない）。交点の中空□は Ini キー `crosshair/center_box_side_px`（0＝□なし、十字のみ）。
+- UIログウィンドウ: **表示** → **ログ…**。`logic_cad/ui/logging/log_store.py` が `stdout/stderr` をプロセス内でキャプチャし、`logic_cad/ui/panels/log_window_dialog.py` が `QPlainTextEdit` へタイマー間引き（既定 80ms）で反映する。大量出力時の負荷を抑えるため、履歴はリングバッファ（既定 10,000 行）に制限される。
 
 ---
 
@@ -23,7 +24,7 @@
 
 | 引数 | 効果 |
 |------|------|
-| **`--debug`** | 起動時に `LOGIC_CAD_DEBUG=1` を設定する。**`LOGIC_CAD_DEBUG=1` をシェルで export するのと同じ**（`[logic_cad:…]` 形式のログが標準出力に出る）。 |
+| **`--debug`** | 起動時に root logger を `DEBUG` に設定し、詳細ログ（ルーティング verbose 含む）を有効化する。 |
 | **`--routing-manhattan-only`** | デバッグ用。`LOGIC_CAD_ROUTING_OVG=0` を設定し、固定マンハッタン段のみ試す（OVG マルチを無効化）。 |
 | **`--routing-ovg-only`** | デバッグ用。`LOGIC_CAD_ROUTING_FIXED=0` を設定し、OVG マルチのみ試す。 |
 
@@ -33,19 +34,16 @@
 
 ## 環境変数: ログ
 
-### `LOGIC_CAD_DEBUG`
+### `LOGIC_CAD_LOG_LEVEL`
 
-真（`1` / `true` / `yes` / `on`）のとき、`logic_cad_log` などの **`[logic_cad:タグ]`** 付きログが標準出力に出ます。タイムスタンプは `HH:MM:SS.mmm` 形式です。
-
-`--debug` は `LOGIC_CAD_DEBUG=1` に加えて `LOGIC_CAD_DEBUG_ROUTING_VERBOSE=1` も設定します。`LOGIC_CAD_DEBUG` だけを手動で有効化したい場合は、シェルで `export LOGIC_CAD_DEBUG=1` を使ってください。
+Python root logger の閾値です（例: `DEBUG` / `INFO` / `WARN` / `ERROR`）。未設定時は `WARN`。  
+また、UI の **表示 → ログ…** のコンボボックスからも実行中に root logger レベルを変更できます（表示フィルタではなく発行閾値の変更）。
 
 **`[logic_cad:toc]`**（`logic_cad/core/services/toc_frame_service.py`）: 目次再生成で **`LD_CONTENTS_AREA` ガイドが無い**ため既定の目次領域 bbox を使うとき、`CONTENTS_*` ブロックの **`LD_CONTENTS_FRAME` 寸法が取れず**セル既定値に落ちるとき、**MTEXT 目次フォールバック**に切り替えたとき、など。
 
-### `LOGIC_CAD_DEBUG_ROUTING_VERBOSE`
+### ルーティング verbose ログ
 
-**量の多いルーティング詳細**（行ごとのバンドル、OVG の no_path / first_hop、escape トレース、`bundle vertical_parallel_diag` など）を出すフラグです。
-
-**前提:** `logic_cad_debug_routing_verbose()` は **`LOGIC_CAD_DEBUG` が有効なときだけ** 真になります。`--debug` なら両方自動で有効化されます。手動設定時は `LOGIC_CAD_DEBUG=1` と併用してください。`LOGIC_CAD_DEBUG_ROUTING_VERBOSE` だけでは詳細ルーティングログは有効になりません。
+**量の多いルーティング詳細**（行ごとのバンドル、OVG の no_path / first_hop、escape トレース、`bundle vertical_parallel_diag` など）は、`logic_cad` ロガーが `DEBUG` レベルのとき有効です（`--debug` で有効化）。
 
 OVG の負荷調査向けに、次のログも出力されます（`logic_cad/core/routing/ovg.py`）。
 
@@ -57,14 +55,6 @@ OVG の負荷調査向けに、次のログも出力されます（`logic_cad/co
 例（Unix シェル）:
 
 ```bash
-export LOGIC_CAD_DEBUG=1
-export LOGIC_CAD_DEBUG_ROUTING_VERBOSE=1
-python -m logic_cad.app.main
-```
-
-または:
-
-```bash
 python -m logic_cad.app.main --debug
 ```
 
@@ -72,8 +62,8 @@ python -m logic_cad.app.main --debug
 
 `symlib_log` の **`[symlib] …`** 出力を制御します。
 
-- **`LOGIC_CAD_DEBUG=1` のとき**は、シンボルライブラリ用ログも **常に有効**（一般デバッグに含まれる）。
-- **`LOGIC_CAD_DEBUG` が無効**でも、`LOGIC_CAD_DEBUG_SYMLIB=1` だけで **`[symlib]` だけ**を有効にできます（全体の `[logic_cad:…]` は出ません）。
+- **root logger が `INFO` 以下**のときは、シンボルライブラリ用ログも有効（一般デバッグに含まれる）。
+- root logger が `WARN` 以上でも、`LOGIC_CAD_DEBUG_SYMLIB=1` で **`symlib` だけ**を追加有効化できます。
 
 ---
 
@@ -88,6 +78,10 @@ python -m logic_cad.app.main --debug
 ## 図枠テンプレート適用（`apply_frame_template_from_path`）
 
 `logic_cad/core/services/layout_service.apply_frame_template_from_path` は、ユーザーが選んだ DXF（`generate/frame_template.py` と同系の `LD_PAPER_FRAME` / `CONTENTS_*` を想定）から、テンプレ用ブロック定義を `reload_symbol_library` と同様に**中身差し替え**し、各用紙レイアウトで **`LD_PAPER_FRAME` の INSERT を削除**（未タグの旧コピー含む）→ **`LD_CONTENTS_AREA` ガイドの削除** → `import_frame_template(..., path=...)` で再配置 → `regenerate_toc` / `refresh_all_frame_captions`。UI は **テンプレート** → **図枠テンプレートを適用…**。
+
+- 2026-04 更新: `import_frame_template` は template の modelspace をコピーせず、`LD_PAPER_FRAME` / `CONTENTS_*` のブロック定義を取り込んだうえで、用紙レイアウトに `LD_PAPER_FRAME` の INSERT を 1 つだけ配置する。
+- 2026-04 更新: 図枠 ATTDEF は `DWG_NO`, `PAGE_NAME`, `PAGE_DESC`, `PAGE_REV`, `PAGE_NUM`, `PAGE_TOTAL` の 6 タグを直接同期する（`{{}}` 展開非依存）。
+- 2026-04 更新: DXF 読込は fast-path `ezdxf.readfile` 失敗時に `ezdxf.recover.readfile(errors='ignore')` へフォールバックし、監査エラーは `logic_cad_log("dxf", ...)` へ記録する。
 
 ---
 
@@ -231,6 +225,8 @@ python -m logic_cad.app.main --debug
 - 色ピッカー実装メモ: `_LayerColorSwatchButton._pick_color()` は static `QColorDialog.getColor(..., self, ...)` を使わず、`QColorDialog` インスタンスをトップレベル親（`self.window()`）で生成する。色スウォッチボタン自身の `background-color` スタイルを親にすると、色ダイアログの見た目が選択色に引きずられる環境があるため。
 - キャンバスでの配線・ユーザ図形の色: [`logic_cad/ui/dxf_display_color.py`](../logic_cad/ui/dxf_display_color.py) の `entity_stroke_qcolor` がエンティティの BYLAYER / 真色 / ACI を `QColor` に解決する。
 - [`ensure_standard_layers`](../logic_cad/core/dxf/dxf_repository.py) は **標準レイヤを初めて `doc.layers` に追加するときだけ** デフォルト ACI を付与する。既存レイヤの `color` / `true_color` は読み込み・保存のたびに上書きしない（ユーザー設定の永続化）。
+- チェックボックス視認性: `QCheckBox::indicator` は OS テーマ依存にせず [`logic_cad/ui/styles/app_stylesheet.py`](../logic_cad/ui/styles/app_stylesheet.py) で明示スタイルする。チェックON/OFFアイコンは [`logic_cad/ui/styles/assets/checkbox_checked.svg`](../logic_cad/ui/styles/assets/checkbox_checked.svg) / [`logic_cad/ui/styles/assets/checkbox_unchecked.svg`](../logic_cad/ui/styles/assets/checkbox_unchecked.svg) を使用。
+- 目視確認ポイント（チェックボックス修正時）: プロパティ、検索ダイアログ、PDF出力ダイアログで ON/OFF/disabled が背景色とマークで判別できることを確認する。
 
 ### 線種名の定数（`constants.py`）
 
@@ -239,7 +235,7 @@ python -m logic_cad.app.main --debug
 
 ## 関連ドキュメント
 
-- ユーザーマニュアルの起動例・図枠まわりのログ言及: [`user_manual.md`](user_manual.md)（§1・§4-1）
+- ユーザーマニュアルの起動例・図枠まわりのログ言及: [`user_manual.md`](user_template_manual.md)（§1・§4-1）
 
 ## インアプリマニュアル（Markdown ビューワ）
 
@@ -288,6 +284,8 @@ python -m logic_cad.app.main --debug
   DXFエンティティではないUI生成テキスト（`USER_TEXT` など）を同じ構造へ揃える。
 - `ui_font_family_chain(...)` / `resolve_pdf_font_face_for_ui_family_chain(...)` / `apply_render_context_fonts_for_pdf_like_ui(...)`  
   UIの family chain は **（プロジェクト優先フォントがあればそれ）→ DXF style 由来 → `font_family_candidates` 順 → `sans-serif`**。プロジェクト優先は **プロジェクト設定 → 優先フォント…** で選び、ドキュメントアンカー POINT の ``LD_DOC`` XDATA キー `preferred_font_family` に保存する（未設定・空＝従来どおり DXF 優先）。PDF（matplotlib 経路）は **TEXTSTYLE ごと**に同じチェーンで `FontFace` を解決し、`RenderContext.fonts` を上書きする。スタイル単位の優先ファミリは `font_family_preferred_for_named_style` / `font_family_preferred_for_style_table_key` で UI と揃える。既定スタイルのみ必要な場合は `preferred_pdf_font_face()`（内部で上記チェーンのデフォルト起点を使用）。
+- `decode_dxf_unicode_escapes(...)`  
+  DXF の特殊 Unicode エスケープ（例: `\U+3042`）を UI/PDF で共通解釈する。`normalize_newlines(...)` は内部でこの関数を通す。PDF 側は `pdf_export_service._PdfExportFrontend` が描画直前にテキスト系エンティティをクローンしてこのデコードを適用し、元の DXF エンティティを変更しない。
 
 設計意図:
 
@@ -335,3 +333,19 @@ python -m logic_cad.app.main --debug
 ## シンボルクリップボード（プロセス間コピー）
 
 編集メニューのコピー／貼り付けは、`MainWindow._symbol_clipboard` に加え **`QClipboard`** に独自 MIME `application/x-logic-cad-symbol-clipboard`（UTF-8 JSON、実装は `logic_cad/core/symbol_clipboard_codec.py`）を書き込む。別プロセスの logic_cad でも、同じブロック定義が貼り付け先 DXF に存在すれば貼り付け可能。ブロック未定義の場合は従来どおりエラーになる。
+
+---
+
+## PAGE_REF の PAGE_NAME / PAGE_DESC 表示
+
+- `PAGE_REF` は XDATA キー `show_page_name` / `show_page_desc`（`"1"` のとき ON）で、`PAGE_FROM` / `PAGE_TO` に定義された `PAGE_NAME` / `PAGE_DESC` ATTDEF の表示可否をそれぞれ切り替える。
+- 新規配置時のデフォルトは両方 OFF（`"0"`）で、`SYM` は従来どおり常に非表示 ATTRIB として同期する。
+- `refresh_page_ref_syms_on_layout()` は `SYM` の再採番に加え、リンク先レイアウト名・`page_desc` を `PAGE_NAME` / `PAGE_DESC` ATTRIB に同期する（ATTDEF が無い場合は no-op）。
+
+---
+
+## WIRE矢印の線種固定（2026-04）
+
+- `WireArrowItem`（`logic_cad/ui/items/wire_arrow_item.py`）の矢印描画は、`WIRE` エンティティの `linetype` に関係なく常に `Qt.PenStyle.SolidLine` で描画する。
+- DXF 側の `WIRE_ARROW` には従来どおり親 `WIRE` の `linetype` を同期して保持する（`sync_wire_arrow_dxf`）。データ整合性は維持しつつ、UI表示のみ矢印を実線固定にする設計。
+- AND/OR の入力スタブ矢印（`SymbolItem._paint_gate_stub_in_arrows`）も同様に実線を明示指定し、矢印系描画の仕様を統一した。

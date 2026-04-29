@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QApplication
 
 from logic_cad.core.routing.profile import ENV_ROUTING_FIXED, ENV_ROUTING_OVG
 from logic_cad.ui.app_user_settings import APP_DISPLAY_NAME, APP_ORG_NAME
+from logic_cad.ui.logging import install_process_stream_capture, install_python_logging_bridge
 from logic_cad.ui.main_window import MainWindow
 
 
@@ -18,7 +19,7 @@ def main() -> None:
     ap.add_argument(
         "--debug",
         action="store_true",
-        help="標準出力に [logic_cad:…] ログ（環境変数 LOGIC_CAD_DEBUG=1 と同じ）",
+        help="root logger レベルを DEBUG にして詳細ログを有効化する",
     )
     ro = ap.add_mutually_exclusive_group()
     ro.add_argument(
@@ -38,9 +39,6 @@ def main() -> None:
         ),
     )
     args = ap.parse_args()
-    if args.debug:
-        os.environ["LOGIC_CAD_DEBUG"] = "1"
-        os.environ["LOGIC_CAD_DEBUG_ROUTING_VERBOSE"] = "1"
     if args.routing_manhattan_only:
         os.environ[ENV_ROUTING_OVG] = "0"
         os.environ.pop(ENV_ROUTING_FIXED, None)
@@ -48,6 +46,9 @@ def main() -> None:
         os.environ[ENV_ROUTING_FIXED] = "0"
         os.environ.pop(ENV_ROUTING_OVG, None)
 
+    install_process_stream_capture(forward_to_original=True)
+    default_level = "DEBUG" if args.debug else os.environ.get("LOGIC_CAD_LOG_LEVEL", "WARN")
+    install_python_logging_bridge(default_level=default_level)
     app = QApplication(sys.argv)
     app.setOrganizationName(APP_ORG_NAME)
     app.setApplicationName(APP_DISPLAY_NAME)

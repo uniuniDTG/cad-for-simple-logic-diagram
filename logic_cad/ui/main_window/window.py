@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut, QShowEvent
 from pathlib import Path
@@ -33,10 +34,16 @@ from logic_cad.ui.toast import show_toast
 from logic_cad.ui.views.diagram_view import DiagramView
 from logic_cad.ui.app_user_settings import AppUserSettings, load_app_user_settings, save_app_user_settings
 from logic_cad.ui.panels.symbol_library_dialog import SymbolLibraryDialog
+from logic_cad.ui.panels.log_window_dialog import LogWindowDialog
 from logic_cad.ui.user_settings_dialog import run_user_settings_dialog
 from logic_cad.ui.find_replace_dialog import FindReplaceDialog
-from logic_cad.core.services.layout_service import apply_frame_template_from_path
-from logic_cad.core.services.layout_service import reload_symbol_library
+from logic_cad.core.services.layout_service import (
+    apply_frame_template_from_path,
+    reload_symbol_library,
+    validate_frame_template_path,
+)
+
+_TEMPLATE_VALIDATION_LOGGER = logging.getLogger("logic_cad.validation.template")
 
 class MainWindow(QMainWindow):
     _page_tabs: object
@@ -112,6 +119,7 @@ class MainWindow(QMainWindow):
         self._symbol_clipboard = None
         self._symbol_library_dialog = None
         self._manual_dialog = None
+        self._log_dialog: LogWindowDialog | None = None
         self._find_dialog: FindReplaceDialog | None = None
 
         sc_find_next = QShortcut(QKeySequence("F3"), self)
@@ -246,6 +254,35 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            issues = validate_frame_template_path(path)
+        except Exception as ex:
+            show_toast(
+                f"図枠テンプレートの検証に失敗しました: {ex}",
+                parent_window=self,
+                duration=6000,
+            )
+            return
+        if issues:
+            for issue in issues:
+                _TEMPLATE_VALIDATION_LOGGER.warning(issue)
+            excerpt = "\n".join(f"- {msg}" for msg in issues[:8])
+            if len(issues) > 8:
+                excerpt += f"\n... 他 {len(issues) - 8} 件"
+            ret_issue = QMessageBox.question(
+                self,
+                "図枠テンプレート検証",
+                "テンプレート検証で問題が見つかりました。\n"
+                "適用すると既存図面に不整合を持ち込む可能性があります。\n\n"
+                f"{excerpt}\n\n"
+                "警告を許容して続行しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret_issue != QMessageBox.StandardButton.Yes:
+                show_toast("図枠テンプレート適用をキャンセルしました。", parent_window=self)
+                return
+
+        try:
             apply_frame_template_from_path(self._diagram.doc, path)
         except Exception as ex:
             show_toast(
@@ -314,6 +351,13 @@ class MainWindow(QMainWindow):
         self._manual_dialog.show()
         self._manual_dialog.raise_()
         self._manual_dialog.activateWindow()
+
+    def _show_log_window(self) -> None:
+        if self._log_dialog is None:
+            self._log_dialog = LogWindowDialog(parent=self)
+        self._log_dialog.show()
+        self._log_dialog.raise_()
+        self._log_dialog.activateWindow()
 
     def _reload_symbol_library(self) -> None:
         ret = QMessageBox.question(

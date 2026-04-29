@@ -14,7 +14,7 @@ from logic_cad.core.model.constants import (
     LAYER_FRAME_TEXT,
 )
 from logic_cad.core.pages.page_order import list_paper_layout_names_sorted
-from logic_cad.core.services.layout_service import apply_frame_template_from_path
+from logic_cad.core.services.layout_service import apply_frame_template_from_path, validate_frame_template_path
 
 
 def _write_minimal_frame_template(path: Path, dwg_attdef_text: str) -> None:
@@ -79,3 +79,16 @@ def test_apply_frame_template_replaces_block_and_avoids_duplicate_inserts(tmp_pa
     assert _dwg_no_attdef_text(doc) == "LABEL_B"
     n_after_second = _count_paper_frame_inserts(doc)
     assert n_after_second == len(list_paper_layout_names_sorted(doc))
+
+
+def test_validate_frame_template_path_detects_invalid_port_layer(tmp_path: Path) -> None:
+    bad = tmp_path / "bad_template.dxf"
+    doc = ezdxf.new("R2010", setup=["styles"], units=4)
+    ensure_standard_layers(doc)
+    ensure_regapp(doc)
+    blk = doc.blocks.new("BAD_BLOCK")
+    blk.add_point((0.0, 0.0), dxfattribs={"layer": "LD_PORT_INVALID"})
+    doc.saveas(str(bad))
+
+    issues = validate_frame_template_path(bad)
+    assert any("ポートレイヤー" in msg for msg in issues)

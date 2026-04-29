@@ -1,7 +1,10 @@
 """Facade smoke."""
 
+from pathlib import Path
+
 import pytest
 
+import logic_cad.core.logic_diagram as logic_diagram_module
 from logic_cad.core.logic_diagram import LogicDiagram
 from logic_cad.core.model.constants import FIRST_PAGE_NAME
 
@@ -9,6 +12,17 @@ from logic_cad.tests.support.wire_meta import (
     assert_wire_meta_canonical_out_to_in,
     count_wires_from_src_port,
 )
+
+
+def test_save_keeps_warnings_but_writes_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    d = LogicDiagram.new()
+    out_path = tmp_path / "warn_save.dxf"
+
+    monkeypatch.setattr(logic_diagram_module, "validate_document", lambda _doc: ["dummy warning"])
+
+    issues = d.save(str(out_path))
+    assert issues == ["dummy warning"]
+    assert out_path.is_file()
 
 
 def test_new_list_pages():

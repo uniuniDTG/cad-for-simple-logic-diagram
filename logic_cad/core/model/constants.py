@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from logic_cad import __version__ as LOGIC_CAD_VERSION
+
 APPID = "LD_APP"
+# Application display name for UI text and title bar.
+APP_DISPLAY_NAME = "Logic CAD"
+APP_DISPLAY_NAME_WITH_VERSION = f"{APP_DISPLAY_NAME} v{LOGIC_CAD_VERSION}"
 # Document-level metadata (creator, doc format version, DXF profile); XDATA on a single model POINT.
 APPID_DOC = "LD_DOC"
 
@@ -155,7 +160,7 @@ ALL_LAYERS = (
 GRID_PITCH = 1.0
 
 # User-placed annotation TEXT height (default when sketch/text tools use this constant)
-USER_TEXT_DEFAULT_HEIGHT_MM = 3.0
+USER_TEXT_DEFAULT_HEIGHT_MM = 2.0
 # USER_CLOUD defaults: arc bulge magnitude and calligraphy style.
 USER_CLOUD_BULGE = 0.6
 USER_CLOUD_CALLIGRAPHY = False

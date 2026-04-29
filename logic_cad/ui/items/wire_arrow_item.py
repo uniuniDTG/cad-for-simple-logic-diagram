@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyle, QStyleOptionGraphicsItem, QWidget
 
 from logic_cad.core.model.constants import LINETYPE_LOGIC
+from logic_cad.ui.items.wire_item import dxf_to_scene
 from logic_cad.ui.scene_item.z_order import CANVAS_Z_SYMBOL_AND_WIRE_ARROW
-from logic_cad.ui.items.wire_item import apply_dxf_linetype_to_pen, dxf_to_scene
 
 
 class WireArrowItem(QGraphicsPathItem):
@@ -45,7 +46,9 @@ class WireArrowItem(QGraphicsPathItem):
         base = QColor(200, 200, 210) if stroke_color is None else QColor(stroke_color)
         pen = QPen(base, 0)
         pen.setCosmetic(True)
-        apply_dxf_linetype_to_pen(pen, self._linetype)
+        # Arrowhead visibility must stay consistent across wire styles.
+        pen.setStyle(Qt.PenStyle.SolidLine)
+        pen.setDashPattern([])
         self.setPen(pen)
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         # Above wire centerlines; clicks pass through to WireItem (lower Z).

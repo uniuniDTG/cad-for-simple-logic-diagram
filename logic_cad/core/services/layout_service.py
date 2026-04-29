@@ -44,6 +44,7 @@ from logic_cad.core.model.constants import (
     TARGET_LAYOUT_XDATA,
 )
 from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, load_dxf_with_recover
+from logic_cad.core.dxf.dxf_validator import validate as validate_dxf_document
 from logic_cad.core.debug.debug_log import logic_cad_log
 from logic_cad.core.debug.debug_symlib import symlib_log
 from logic_cad.core.pages.page_order import (
@@ -58,6 +59,7 @@ from logic_cad.core.pages.page_ref import refresh_all_page_ref_syms, remap_page_
 from logic_cad.core.pages.page_ref import refresh_page_ref_syms_on_layout
 from logic_cad.core.model.xdata import (
     build_ld_app_tags,
+    ensure_regapp,
     get_type,
     get_uid,
     new_uid,
@@ -500,6 +502,27 @@ def _strip_paper_frame_inserts_from_paper_block(doc: Drawing, blk) -> None:
         if str(e.dxf.name) != BLOCK_PAPER_FRAME:
             continue
         destroy_entity(doc, e)
+
+
+def validate_frame_template_path(path: Path) -> list[str]:
+    """Validate a template DXF before applying it to the current document.
+
+    Args:
+        path: Template DXF path selected by the user.
+
+    Returns:
+        Validation issue messages. Empty list means the template passed checks.
+
+    Raises:
+        FileNotFoundError: If *path* is not an existing file.
+    """
+    p = Path(path).expanduser()
+    if not p.is_file():
+        raise FileNotFoundError(str(p))
+    src = load_dxf_with_recover(p, errors="ignore")
+    ensure_standard_layers(src)
+    ensure_regapp(src)
+    return validate_dxf_document(src)
 
 
 def apply_frame_template_from_path(doc: Drawing, path: Path) -> None:

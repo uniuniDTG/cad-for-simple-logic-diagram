@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import time
+import logging
 import re
+import time
 
 from ezdxf.document import Drawing
 
@@ -118,16 +119,19 @@ class LogicDiagram:
         first = names[0] if names else FIRST_PAGE_NAME
         return cls(doc, first, str(path))
 
-    def save(self, path: str | None = None) -> None:
+    def save(self, path: str | None = None) -> list[str]:
         p = path or self.path
         if not p:
             raise ValueError("保存先のパスがありません。")
         issues = validate_document(self.doc)
         if issues:
-            raise ValueError("検証に失敗しました: " + "; ".join(issues[:5]))
+            logger = logging.getLogger("logic_cad.validation.save")
+            for issue in issues:
+                logger.warning(issue)
         saveas(self.doc, p)
         self.path = str(p)
         self.mark_saved()
+        return issues
 
     def begin(self, label: str) -> DocumentTransaction:
         return DocumentTransaction(self, label)

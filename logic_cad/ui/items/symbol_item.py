@@ -33,7 +33,6 @@ from logic_cad.core.model.constants import (
     ENTITY_TYPE_WIRE_BRANCH,
     GATE_STATIC_TEXT_HEIGHT_AND_MM,
     GATE_STATIC_TEXT_HEIGHT_OR_MM,
-    LINETYPE_LOGIC,
     WIRE_BRANCH_RADIUS_MM,
 )
 from logic_cad.core.routing.wire_arrow_geometry import wire_in_arrow_wing_points_xyb
@@ -45,7 +44,7 @@ from logic_cad.ui.block_paint import (
     paint_text_path_mm,
 )
 from logic_cad.ui.scene_item.z_order import CANVAS_Z_PAPER_LIKE_SYMBOL, CANVAS_Z_SYMBOL_AND_WIRE_ARROW
-from logic_cad.ui.items.wire_item import apply_dxf_linetype_to_pen, dxf_to_scene
+from logic_cad.ui.items.wire_item import dxf_to_scene
 from logic_cad.ui.snap_utils import dxf_from_scene_pos, scene_pos_from_dxf
 
 if TYPE_CHECKING:
@@ -179,7 +178,7 @@ class SymbolItem(QGraphicsItem):
             y0, y1 = min(ys) - pad - pr, max(ys) + pad + pr
             self._bounds = QRectF(x0, y0, x1 - x0, y1 - y0)
         else:
-            self._bounds = QRectF(-2, -2, 8, 8)
+            self._bounds = QRectF(-2, -2, 2, 2)
 
         if self._doc is not None and self._insert_block_name and self._gate_geom is None:
             # PAGE_REF: SYM is often invisible in DXF for plot; editor still shows link target text.
@@ -249,7 +248,9 @@ class SymbolItem(QGraphicsItem):
         """
         pen = QPen(QColor(200, 200, 210), 0)
         pen.setCosmetic(True)
-        apply_dxf_linetype_to_pen(pen, LINETYPE_LOGIC)
+        # Input-stub arrowheads are always rendered as solid lines, independent of wire style.
+        pen.setStyle(Qt.PenStyle.SolidLine)
+        pen.setDashPattern([])
         painter.setPen(pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         for yi in g.stub_ys:
