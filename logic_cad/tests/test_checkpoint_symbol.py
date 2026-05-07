@@ -61,24 +61,21 @@ def test_checkpoint_out_into_wire_branch_fanout():
     d.rebuild_index()
     hub = d.place_wire_branch((40.0, 12.0))
     d.connect_ports(n, "OUT0_LOGIC", cp, "IN0_MULTI")
-    d.connect_ports(cp, "OUT0_MULTI", hub, "IN0_MULTI")
-    d.connect_ports(hub, "OUT0_MULTI", g1, "IN0_LOGIC")
-    d.connect_ports(hub, "OUT0_MULTI", g2, "IN0_LOGIC")
-    d.connect_ports(hub, "OUT0_MULTI", g3, "IN0_LOGIC")
+    d.connect_ports(cp, "OUT0_MULTI", hub, "INOUT0_MULTI")
+    d.connect_ports(hub, "INOUT0_MULTI", g1, "IN0_LOGIC")
+    d.connect_ports(hub, "INOUT0_MULTI", g2, "IN0_LOGIC")
+    d.connect_ports(hub, "INOUT0_MULTI", g3, "IN0_LOGIC")
 
 
 def test_checkpoint_wrong_clicked_hub_port_normalized_when_gate_drives():
-    """Hub-first normalize: gate OUT→checkpoint ignores the clicked hub port name."""
+    """Checkpoint accepts IN0 only; wrong clicked port should raise."""
     d = LogicDiagram.new()
     with d.begin("place"):
         n = d.place_symbol("NOT", (10.0, 10.0))
         cp = d.place_checkpoint((25.0, 10.0))
     d.rebuild_index()
-    wid = d.connect_ports(n, "OUT0_LOGIC", cp, "OUT0_MULTI")
-    d.rebuild_index()
-    meta = ld_app_dict_for_uid(d.doc, wid)
-    assert meta.get("dst") == cp
-    assert meta.get("dst_port") == "IN0_MULTI"
+    with pytest.raises(ValueError, match="IN0_MULTI"):
+        d.connect_ports(n, "OUT0_LOGIC", cp, "OUT0_MULTI")
 
 
 def test_checkpoint_out_port_escape_prefers_toward_direction():

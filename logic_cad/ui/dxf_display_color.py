@@ -6,6 +6,8 @@ from PySide6.QtGui import QColor
 from ezdxf.colors import aci2rgb, int2rgb, rgb2int
 from ezdxf.document import Drawing
 
+from logic_cad.core.model.constants import LINETYPE_CONTINUOUS
+
 # Default wire/sketch stroke when layer is missing (matches former hardcoded pen).
 _FALLBACK_STROKE_QCOLOR = QColor(200, 200, 210)
 
@@ -67,6 +69,30 @@ def entity_stroke_qcolor(doc: Drawing, entity) -> QColor:
         return layer_stroke_qcolor(doc, str(dxf.layer))
     rgb = aci2rgb(color)
     return QColor(int(rgb.r), int(rgb.g), int(rgb.b))
+
+
+def entity_effective_linetype(doc: Drawing, entity) -> str:
+    """Resolve stroke linetype for Qt preview (BYLAYER from layer table, BYBLOCK → continuous).
+
+    ``BYBLOCK`` is not resolved without an INSERT context; canvas block-definition paint treats
+    it as continuous. Layer table chains that remain ``BYLAYER`` likewise fall back to
+    continuous.
+    """
+
+    raw = getattr(entity.dxf, "linetype", None)
+    lt_entity = str(raw).strip().upper() if raw is not None else ""
+    if lt_entity == "BYBLOCK":
+        return LINETYPE_CONTINUOUS
+    need_layer = (not lt_entity) or lt_entity == "BYLAYER"
+    if not need_layer:
+        return lt_entity
+    lyr = str(getattr(entity.dxf, "layer", "") or "").strip()
+    if lyr and lyr in doc.layers:
+        layer_raw = getattr(doc.layers.get(lyr).dxf, "linetype", None)
+        lt_layer = str(layer_raw).strip().upper() if layer_raw is not None else ""
+        if lt_layer and lt_layer not in ("BYLAYER", "BYBLOCK"):
+            return lt_layer
+    return LINETYPE_CONTINUOUS
 
 
 def apply_qcolor_to_dxf_layer(layer, qc: QColor) -> None:

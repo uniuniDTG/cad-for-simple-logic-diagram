@@ -84,6 +84,7 @@ class SymbolItem(QGraphicsItem):
         instance_attribs: dict[str, tuple[str, bool]] | None = None,
         show_input_stub_in_arrow: bool = False,
         inpage_sym_height_mm: float | None = None,
+        page_ref_target_broken: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -115,10 +116,11 @@ class SymbolItem(QGraphicsItem):
         self._ortho_axis_locked: str | None = None
         self._port_local: dict[str, QPointF] = {}
         self._bounds = QRectF()
-        # WIRE_BRANCH: True when XDATA shows wires on both IN0_MULTI and OUT0_MULTI.
-        self._wire_branch_fully_connected = True
+        # WIRE_BRANCH: white when incident wire count is 3+, otherwise red.
+        self._wire_branch_ready = False
         self._show_input_stub_in_arrow = bool(show_input_stub_in_arrow)
         self._inpage_sym_height_mm = inpage_sym_height_mm
+        self._page_ref_target_broken = bool(page_ref_target_broken)
         self._rebuild_geometry(index)
         ix, iy = insert_xy
         self.setPos(ix, -iy)
@@ -208,9 +210,12 @@ class SymbolItem(QGraphicsItem):
 
         if self.entity_type == ENTITY_TYPE_WIRE_BRANCH:
             uid = self.symbol_uid
-            in_ok = (uid, "IN0_MULTI") in index.connected_endpoint_ports
-            out_ok = (uid, "OUT0_MULTI") in index.connected_endpoint_ports
-            self._wire_branch_fully_connected = in_ok and out_ok
+            incident = 0
+            for edge in index.graph.edges:
+                src_uid, dst_uid, _wire_uid = edge
+                if src_uid == uid or dst_uid == uid:
+                    incident += 1
+            self._wire_branch_ready = incident >= 3
 
     def boundingRect(self) -> QRectF:
         return self._bounds
@@ -272,6 +277,7 @@ class SymbolItem(QGraphicsItem):
     ) -> None:
         g_extra = glyph_upright_extra_deg(self._rotation_deg)
         if self.entity_type == "PAGE_REF":
+            accent = QColor(200, 50, 50) if self._page_ref_target_broken else QColor(120, 220, 120)
             painted = (
                 self._doc is not None
                 and self._insert_block_name
@@ -288,8 +294,12 @@ class SymbolItem(QGraphicsItem):
                 )
             )
             if not painted:
-                painter.setPen(QPen(QColor(180, 200, 255), 0))
-                painter.setBrush(QBrush(QColor(40, 50, 70)))
+                if self._page_ref_target_broken:
+                    painter.setPen(QPen(QColor(200, 50, 50), 0))
+                    painter.setBrush(QBrush(QColor(80, 30, 30)))
+                else:
+                    painter.setPen(QPen(QColor(180, 200, 255), 0))
+                    painter.setBrush(QBrush(QColor(40, 50, 70)))
                 painter.drawRoundedRect(self._bounds, 0.4, 0.4)
                 painter.setFont(QFont("Consolas", 2.0))
                 label = self.block_name[:28] if len(self.block_name) > 28 else self.block_name
@@ -305,10 +315,14 @@ class SymbolItem(QGraphicsItem):
                     if spin:
                         painter.restore()
             pr = 0.12
-            painter.setPen(QPen(QColor(120, 220, 120), 0))
+            painter.setPen(QPen(accent, 0))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             for _pk, pt in self._port_local.items():
                 painter.drawEllipse(pt, pr, pr)
+            if self._page_ref_target_broken:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QBrush(QColor(220, 80, 80, 72)))
+                painter.drawRoundedRect(self._bounds.adjusted(-0.2, -0.2, 0.2, 0.2), 0.4, 0.4)
         elif self.entity_type == ENTITY_TYPE_INPAGE_REF:
             painted = (
                 self._doc is not None
@@ -353,7 +367,7 @@ class SymbolItem(QGraphicsItem):
         elif self.entity_type == ENTITY_TYPE_WIRE_BRANCH:
             r = WIRE_BRANCH_RADIUS_MM
             # Body colour from XDATA wire endpoints only (not click-time port hints).
-            if self._wire_branch_fully_connected:
+            if self._wire_branch_ready:
                 pen_c = QColor(220, 220, 220)
                 fill_c = QColor(220, 220, 220)
             else:

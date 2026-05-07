@@ -5,6 +5,7 @@ Printing/PDF (future): render this QGraphicsScene or export the same Drawing as 
 
 from __future__ import annotations
 
+import os
 import math
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
@@ -56,8 +57,10 @@ from logic_cad.core.model.constants import (
     USER_TEXT_DEFAULT_HEIGHT_MM,
 )
 from logic_cad.core.logic_diagram import RerouteAfterGeometryChangeError
+from logic_cad.core.obstacles import build_routing_obstacles
 from logic_cad.core.uid_display import format_uid_display
 from logic_cad.core.pages.page_order import is_toc_layout_name
+from logic_cad.core.pages.page_ref import page_ref_insert_target_unresolved_for_editor
 from logic_cad.core.routing.wire_polyline_geometry import offset_polyline_segment_parallel
 from logic_cad.core.services.toc_frame_service import TOC_TEXT_TYPE
 from logic_cad.core.model.user_sketch_layers import (
@@ -82,6 +85,16 @@ from logic_cad.ui.snap_utils import dxf_from_scene_pos, snap_dxf_pos, snap_paral
 
 if TYPE_CHECKING:
     from logic_cad.core.logic_diagram import LogicDiagram
+
+
+ENV_SHOW_ROUTING_BBOX = "LOGIC_CAD_SHOW_ROUTING_BBOX"
+ENV_SHOW_CONNECT_BBOX = "LOGIC_CAD_SHOW_CONNECT_BBOX"
+
+
+def _env_truthy(name: str) -> bool:
+    """Return True when environment variable *name* is set to a truthy value."""
+    raw = (os.environ.get(name) or "").strip().lower()
+    return raw not in ("", "0", "false", "no", "off")
 
 
 def _dist_sq_point_to_segment(
@@ -112,7 +125,7 @@ class DiagramScene(QGraphicsScene):
     def __init__(self, diagram: LogicDiagram, parent=None) -> None:
         super().__init__(parent)
         self._diagram = diagram
-        self._on_navigate_page: Callable[[str], None] | None = None
+        self._on_navigate_page: Callable[[str, str | None], None] | None = None
         self._on_navigate_inpage_peer: Callable[[str], None] | None = None
         self._wire_start: tuple[str, str] | None = None
         self._wire_rubber: QGraphicsLineItem | None = None
@@ -144,6 +157,9 @@ class DiagramScene(QGraphicsScene):
         self._sketch_preview_cloud: QGraphicsPathItem | None = None
         self._sketch_line_preview_length_mm: float | None = None
         self._user_sketch_line_linetype: str = normalize_user_sketch_linetype(LINETYPE_CONTINUOUS)
+        self._show_routing_bbox = _env_truthy(ENV_SHOW_ROUTING_BBOX)
+        self._show_connect_bbox = _env_truthy(ENV_SHOW_CONNECT_BBOX)
+        self._connect_bbox_hover_port: tuple[str, str] | None = None
         self.setSceneRect(-500, -500, 2000, 2000)
         self.rebuild()
 
@@ -168,6 +184,8 @@ class DiagramScene(QGraphicsScene):
         if not on:
             self.cancel_wire_rubber()
         self._wire_mode = on
+        if not on:
+            self._set_connect_bbox_hover_port(None)
 
     def wire_mode(self) -> bool:
         return self._wire_mode
@@ -197,8 +215,8 @@ class DiagramScene(QGraphicsScene):
         self._diagram = diagram
         self.rebuild()
 
-    def set_navigate_page_callback(self, cb: Callable[[str], None] | None) -> None:
-        """Called with layout name when user Ctrl+clicks a PAGE_REF or TOC row (not on a port)."""
+    def set_navigate_page_callback(self, cb: Callable[[str, str | None], None] | None) -> None:
+        """Called with layout name and optional PAGE_REF peer uid to focus after switch (TOC passes None)."""
         self._on_navigate_page = cb
 
     def set_navigate_inpage_peer_callback(self, cb: Callable[[str], None] | None) -> None:
@@ -511,7 +529,7 @@ class DiagramScene(QGraphicsScene):
             self._clear_osnap_marker()
             return
         cand = None
-        if self._wire_mode and not self._manual_wire_mode:
+        if self._wire_mode:
             cand = self._pick_wire_port_osnap(scene_pos)
         elif not self._wire_mode:
             cand = pick_osnap_candidate(
@@ -525,6 +543,38 @@ class DiagramScene(QGraphicsScene):
             self._clear_osnap_marker()
             return
         self._set_osnap_marker(cand.scene_pos)
+
+    def _normalize_wire_endpoint_port_key(self, uid: str, raw_port_key: str) -> str:
+        """Normalize click-hit port key to the actual endpoint key used by wire commands."""
+        sym = self._symbol_items.get(uid)
+        if sym is None:
+            return raw_port_key
+        if sym.entity_type == ENTITY_TYPE_WIRE_BRANCH:
+            return "INOUT0_MULTI"
+        if sym.entity_type == ENTITY_TYPE_CHECKPOINT:
+            if self._wire_start is None:
+                return "OUT0_MULTI"
+            return "IN0_MULTI"
+        return raw_port_key
+
+    def _set_connect_bbox_hover_port(self, value: tuple[str, str] | None) -> None:
+        """Store connect bbox hover candidate and repaint when changed."""
+        if self._connect_bbox_hover_port == value:
+            return
+        self._connect_bbox_hover_port = value
+        self.update()
+
+    def _update_connect_bbox_hover_port(self, scene_pos: QPointF) -> None:
+        """Update hover endpoint used by connect-bbox overlay in wire mode."""
+        if not self._show_connect_bbox or not self._wire_mode or self._wire_start is None:
+            self._set_connect_bbox_hover_port(None)
+            return
+        hit = self._wire_port_hit_at_scene_pos(scene_pos, allow_osnap=True)
+        if hit is None:
+            self._set_connect_bbox_hover_port(None)
+            return
+        uid, raw_pk, _sym = hit
+        self._set_connect_bbox_hover_port((uid, self._normalize_wire_endpoint_port_key(uid, raw_pk)))
 
     def wire_preview_length_mm(self) -> float | None:
         """While auto/manual wire preview is active, length in mm; else None."""
@@ -617,6 +667,7 @@ class DiagramScene(QGraphicsScene):
         self._wire_seg_drag = None
         self._user_line_endpoint_drag = None
         self._wire_preview_length_mm = None
+        self._set_connect_bbox_hover_port(None)
         self._clear_osnap_marker()
         if self._manual_preview_solid is not None:
             self.removeItem(self._manual_preview_solid)
@@ -727,6 +778,82 @@ class DiagramScene(QGraphicsScene):
             y = j * pitch
             painter.drawLine(left, y, right, y)
 
+    def _draw_obstacle_rects(
+        self,
+        painter,
+        rect,
+        obstacles: list[tuple[float, float, float, float]],
+        *,
+        pen_color: QColor,
+        brush_color: QColor,
+    ) -> None:
+        """Draw obstacle AABB list in scene space."""
+        if not obstacles:
+            return
+        painter.save()
+        pen = QPen(pen_color)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(QBrush(brush_color))
+        for x0, y0, x1, y1 in obstacles:
+            p0 = dxf_to_scene(float(x0), float(y0))
+            p1 = dxf_to_scene(float(x1), float(y1))
+            left = min(p0.x(), p1.x())
+            right = max(p0.x(), p1.x())
+            top = min(p0.y(), p1.y())
+            bottom = max(p0.y(), p1.y())
+            if right < rect.left() or left > rect.right() or bottom < rect.top() or top > rect.bottom():
+                continue
+            painter.drawRect(left, top, right - left, bottom - top)
+        painter.restore()
+
+    def drawForeground(self, painter, rect) -> None:
+        super().drawForeground(painter, rect)
+        if not self._show_routing_bbox and not self._show_connect_bbox:
+            return
+        base_obstacles: list[tuple[float, float, float, float]] = []
+        try:
+            if self._show_routing_bbox:
+                base_obstacles = build_routing_obstacles(
+                    self._diagram.doc,
+                    self._diagram.index,
+                    self._diagram.current_layout_name,
+                    set(),
+                )
+        except Exception:
+            base_obstacles = []
+        if self._show_routing_bbox:
+            self._draw_obstacle_rects(
+                painter,
+                rect,
+                base_obstacles,
+                pen_color=QColor(255, 110, 80, 220),
+                brush_color=QColor(255, 110, 80, 45),
+            )
+        if not self._show_connect_bbox or not self._wire_mode or self._wire_start is None:
+            return
+        access_ports: dict[str, set[str]] = {self._wire_start[0]: {self._wire_start[1]}}
+        if self._connect_bbox_hover_port is not None:
+            hu, hp = self._connect_bbox_hover_port
+            access_ports.setdefault(hu, set()).add(hp)
+        try:
+            connect_obstacles = build_routing_obstacles(
+                self._diagram.doc,
+                self._diagram.index,
+                self._diagram.current_layout_name,
+                set(),
+                access_ports=access_ports,
+            )
+        except Exception:
+            return
+        self._draw_obstacle_rects(
+            painter,
+            rect,
+            connect_obstacles,
+            pen_color=QColor(120, 210, 255, 240),
+            brush_color=QColor(120, 210, 255, 45),
+        )
+
     def rebuild(self) -> None:
         self.cancel_user_sketch()
         self.cancel_wire_rubber()
@@ -830,6 +957,15 @@ class DiagramScene(QGraphicsScene):
                 if et in ("AND", "OR"):
                     xd_gate = read_ld_app_dict(ins)
                     show_stub_in_arrow = str(xd_gate.get(GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW) or "") == "1"
+                page_ref_break = False
+                if et == "PAGE_REF":
+                    xd_pr = read_ld_app_dict(ins)
+                    page_ref_break = page_ref_insert_target_unresolved_for_editor(
+                        self._diagram.doc,
+                        str(xd_pr.get(TARGET_LAYOUT_XDATA) or "").strip(),
+                        layout_here=self._diagram.current_layout_name,
+                        ld_app=dict(xd_pr),
+                    )
                 it = SymbolItem(
                     uid,
                     sym_label,
@@ -850,6 +986,7 @@ class DiagramScene(QGraphicsScene):
                     inpage_sym_height_mm=inpage_sym_height_mm
                     if et == ENTITY_TYPE_INPAGE_REF
                     else None,
+                    page_ref_target_broken=page_ref_break,
                 )
                 self.addItem(it)
                 self._symbol_items[uid] = it
@@ -954,10 +1091,7 @@ class DiagramScene(QGraphicsScene):
             if e.dxftype() == "TEXT" and str(e.dxf.layer) == LAYER_ANNOTATION and uid:
                 et = get_type(e)
                 if et == ENTITY_TYPE_USER_TEXT:
-                    t = str(e.dxf.text or "")
-                    ix, iy = float(e.dxf.insert.x), float(e.dxf.insert.y)
-                    h = float(getattr(e.dxf, "height", USER_TEXT_DEFAULT_HEIGHT_MM) or USER_TEXT_DEFAULT_HEIGHT_MM)
-                    self.addItem(UserTextItem(uid, ix, iy, t, height_mm=h, doc=self._diagram.doc))
+                    self.addItem(UserTextItem.from_dxf_entity(uid, e))
             add_passive_layout_primitive_items(self._diagram.doc, self, e)
 
     def _line_end_dxf(self, p0: tuple[float, float], scene_pos: QPointF, shift: bool) -> tuple[float, float]:
@@ -1203,6 +1337,7 @@ class DiagramScene(QGraphicsScene):
             self._wire_preview_length_mm = self._compute_wire_preview_length_mm(spos)
             self._sketch_line_preview_length_mm = None
             self._clear_osnap_marker()
+            self._update_connect_bbox_hover_port(spos)
             return
         if self._wire_rubber is not None and self._wire_anchor is not None:
             sp = spos
@@ -1226,6 +1361,7 @@ class DiagramScene(QGraphicsScene):
         if not self._wire_mode and self._wire_seg_drag is None and self._user_line_endpoint_drag is None:
             self._update_wire_segment_hover(spos)
         self._update_osnap_feedback(spos)
+        self._update_connect_bbox_hover_port(spos)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.RightButton:
@@ -1270,23 +1406,19 @@ class DiagramScene(QGraphicsScene):
             if self._wire_mode:
                 port_hit = self._wire_port_hit_at_scene_pos(
                     sp,
-                    allow_osnap=not self._manual_wire_mode,
+                    allow_osnap=True,
                 )
                 if port_hit is not None:
-                    uid, pk, sym = port_hit
-                    if sym.entity_type == ENTITY_TYPE_CHECKPOINT:
-                        if self._wire_start is None:
-                            pk = "OUT0_MULTI"
-                        else:
-                            pk = "IN0_MULTI"
-                    elif sym.entity_type == ENTITY_TYPE_WIRE_BRANCH:
-                        if self._wire_start is None:
-                            pk = "OUT0_MULTI"
-                        else:
-                            pk = "IN0_MULTI"
+                    uid, pk, _sym = port_hit
+                    pk = self._normalize_wire_endpoint_port_key(uid, pk)
+                    sym = self._symbol_items.get(uid)
+                    if sym is None:
+                        event.accept()
+                        return
                     if self._manual_wire_mode:
                         if self._wire_start is None:
                             self._wire_start = (uid, pk)
+                            self.update()
                             self._diagram.rebuild_index()
                             pw = self._diagram.index.get_port_world(uid, pk)
                             if pw is not None:
@@ -1329,6 +1461,7 @@ class DiagramScene(QGraphicsScene):
                         return
                     if self._wire_start is None:
                         self._wire_start = (uid, pk)
+                        self.update()
                         ap = sym.port_scene_pos(pk)
                         if ap is not None:
                             self._wire_anchor = ap
@@ -1379,7 +1512,8 @@ class DiagramScene(QGraphicsScene):
                             xd = read_ld_app_dict(ins)
                             tgt = xd.get(TARGET_LAYOUT_XDATA)
                             if tgt and str(tgt) in self._diagram.list_pages():
-                                self._on_navigate_page(str(tgt))
+                                peer = (xd.get(PEER_UID_XDATA) or "").strip()
+                                self._on_navigate_page(str(tgt), peer or None)
                     event.accept()
                     return
                 elif (
@@ -1408,7 +1542,7 @@ class DiagramScene(QGraphicsScene):
                                     tgt = str(a.dxf.text or "").strip()
                                     break
                             if tgt and tgt in self._diagram.list_pages() and not is_toc_layout_name(tgt):
-                                self._on_navigate_page(tgt)
+                                self._on_navigate_page(tgt, None)
                     event.accept()
                     return
         super().mousePressEvent(event)

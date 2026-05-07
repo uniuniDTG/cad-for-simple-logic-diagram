@@ -122,11 +122,9 @@ def palette_drag_pixmap_and_hotspot(
     p.translate(pw / 2.0, ph / 2.0)
     p.scale(s, s)
     p.translate(-cx, -cy)
-    # paint_block_strokes inherits painter.pen(); default is black — use white for drag ghost.
     _drag_pen = QPen(QColor(255, 255, 255))
     _drag_pen.setCosmetic(True)
     _drag_pen.setWidthF(0)
-    p.setPen(_drag_pen)
     painted = paint_block_definition(
         p,
         doc,
@@ -137,6 +135,7 @@ def palette_drag_pixmap_and_hotspot(
         sym_tag_visible=True,
         sym_display_text=sym_text,
         instance_attribs=None,
+        stroke_color_override=QColor(255, 255, 255),
     )
     if not painted:
         p.setPen(_drag_pen)

@@ -32,7 +32,7 @@ def _iter_from_rows(rows: list[dict]) -> Iterator[tuple[object, str, dict]]:
     return iter_wire_meta
 
 
-def test_assert_checkpoint_wb_in_full():
+def test_assert_checkpoint_wb_requires_inout_port():
     wb = "wb-1"
     rows = [
         {
@@ -50,7 +50,7 @@ def test_assert_checkpoint_wb_in_full():
         return types.get(uid)
 
     deps = WireGraphDeps(iter_wire_meta=iter_wm, symbol_entity_type_fn=sym_type)
-    with pytest.raises(ValueError, match="配線分岐の入力は1本まで"):
+    with pytest.raises(ValueError, match="INOUT0_MULTI"):
         assert_checkpoint_wire_capacity(
             LAYOUT,
             "b",
@@ -120,13 +120,13 @@ def test_assert_ld_duplicate_dst_port():
         )
 
 
-def test_assert_ld_allows_second_wire_from_wb_out():
+def test_assert_ld_allows_second_wire_from_wb_inout():
     wb = "wb-1"
     rows = [
         {
             "wire_uid": "w1",
             "src": wb,
-            "src_port": "OUT0_MULTI",
+            "src_port": "INOUT0_MULTI",
             "dst": "a",
             "dst_port": "IN0_LOGIC",
         }
@@ -137,15 +137,71 @@ def test_assert_ld_allows_second_wire_from_wb_out():
         return ENTITY_TYPE_WIRE_BRANCH if uid == wb else "NOT"
 
     deps = WireGraphDeps(iter_wire_meta=iter_wm, symbol_entity_type_fn=sym_type)
-    # Second fan-out from same OUT0_MULTI is allowed
+    # Second fan-out from same INOUT0_MULTI is allowed
     assert_ld_port_direct_wiring_rules(
         LAYOUT,
         wb,
-        "OUT0_MULTI",
+        "INOUT0_MULTI",
         "b",
         "IN0_LOGIC",
         deps=deps,
     )
+
+
+def test_assert_ld_rejects_second_wire_on_inout_dst_even_if_existing_is_src():
+    node = "io-1"
+    rows = [
+        {
+            "wire_uid": "w1",
+            "src": node,
+            "src_port": "INOUT0_LOGIC",
+            "dst": "a",
+            "dst_port": "IN0_LOGIC",
+        }
+    ]
+    iter_wm = _iter_from_rows(rows)
+
+    def sym_type(_uid: str) -> str | None:
+        return "SYMBOL"
+
+    deps = WireGraphDeps(iter_wire_meta=iter_wm, symbol_entity_type_fn=sym_type)
+    with pytest.raises(ValueError, match="すでに配線が1本"):
+        assert_ld_port_direct_wiring_rules(
+            LAYOUT,
+            "b",
+            "OUT0_LOGIC",
+            node,
+            "INOUT0_LOGIC",
+            deps=deps,
+        )
+
+
+def test_assert_ld_rejects_second_wire_on_inout_src_even_if_existing_is_dst():
+    node = "io-1"
+    rows = [
+        {
+            "wire_uid": "w1",
+            "src": "a",
+            "src_port": "OUT0_LOGIC",
+            "dst": node,
+            "dst_port": "INOUT0_LOGIC",
+        }
+    ]
+    iter_wm = _iter_from_rows(rows)
+
+    def sym_type(_uid: str) -> str | None:
+        return "SYMBOL"
+
+    deps = WireGraphDeps(iter_wire_meta=iter_wm, symbol_entity_type_fn=sym_type)
+    with pytest.raises(ValueError, match="直接配線はすでに1本"):
+        assert_ld_port_direct_wiring_rules(
+            LAYOUT,
+            node,
+            "INOUT0_LOGIC",
+            "b",
+            "IN0_LOGIC",
+            deps=deps,
+        )
 
 
 def test_wire_connection_health_true_for_out_out_xdata_snapshot():

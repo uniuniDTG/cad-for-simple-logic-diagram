@@ -27,8 +27,6 @@ from logic_cad.core.model.document_meta import (
 )
 from logic_cad.core.graph.port_src_dst_solver import (
     WireFlip,
-    find_flip_to_free_branch_in_for_pending_connection,
-    find_hub_wire_flips,
     normalize_wire_endpoints_with_deps,
 )
 from logic_cad.core.dxf.dxf_repository import new_document, readfile, saveas
@@ -37,6 +35,7 @@ from logic_cad.core.undo.history import HistoryService, destroy_entity, find_ent
 from logic_cad.core.pages.page_order import is_toc_layout_name
 from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
 from logic_cad.core.pages.page_ref import (
+    apply_ordered_page_ref_ranks_with_peers,
     layout_name_for_insert,
     refresh_all_page_ref_syms,
     refresh_page_ref_syms_on_layout,
@@ -173,6 +172,39 @@ class LogicDiagram:
             self.regenerate_toc()
         self.rebuild_index()
 
+    def import_pages_from_foreign_drawing(
+        self,
+        foreign_doc: Drawing,
+        migrations: list[tuple[str, str]],
+    ) -> list[str]:
+        """Copy paper layouts from another drawing into this one and refresh frames/TOC labels.
+
+        Layout block content, dependent block definitions, PAGE_REF target remapping,
+        and Logic CAD UIDs are handled by :meth:`LayoutService.import_paper_layouts_from_foreign_drawing`.
+
+        Args:
+            foreign_doc: Source DXF drawing.
+            migrations: Source layout names and destination layout names to create here.
+
+        Returns:
+            Destination layout names that were created.
+
+        Raises:
+            ValueError: Passed through when validation or ezdxf import fails.
+        """
+        created = self.layouts.import_paper_layouts_from_foreign_drawing(foreign_doc, migrations)
+        if not created:
+            return created
+        for dn in created:
+            refresh_frame_for_layout(self.doc, dn)
+        refresh_all_frame_captions(self.doc)
+        refresh_all_page_ref_syms(self.doc)
+        if TOC_LAYOUT_NAME in self.doc.layouts:
+            self.regenerate_toc()
+        self.mark_modified()
+        self.rebuild_index()
+        return created
+
     def rename_page(self, old: str, new: str) -> None:
         self.layouts.rename_page(old, new)
         if self.current_layout_name == old:
@@ -270,11 +302,10 @@ class LogicDiagram:
     def place_symbol(self, block_name: str, pos: tuple[float, float], ref: str | None = None) -> str:
         if block_name == BLOCK_CHECKPOINT:
             return self.place_checkpoint(pos, ref)
-        et = "NOT" if block_name.upper() == "NOT" else "SYMBOL"
         pos = snap_to_grid(*pos)
         if ref is None:
             ref = self.symbols.next_sym_label(self.current_layout_name, block_name)
-        uid = self.symbols.place_symbol(self.current_layout_name, block_name, pos, ref, et)
+        uid = self.symbols.place_symbol(self.current_layout_name, block_name, pos, ref, "SYMBOL")
         logic_cad_log("diagram", f"place_symbol uid={uid} block={block_name!r} layout={self.current_layout_name!r}")
         self.rebuild_index()
         return uid
@@ -527,32 +558,17 @@ class LogicDiagram:
         return self.reroute_wires_after_symbol_moves({uid})
 
     def connect_ports(self, src_uid: str, src_port: str, dst_uid: str, dst_port: str) -> str:
-        # Repair existing hub chains first so normalize / flip-to-free see a consistent graph.
         self.rebuild_index()
-        self.repair_hub_wire_directions()
-        # One deps bundle for normalize + flip search so solver inputs stay aligned.
         gd = self.wires.wire_graph_deps()
         src_uid, src_port, dst_uid, dst_port = normalize_wire_endpoints_with_deps(
             gd, src_uid, src_port, dst_uid, dst_port
         )
         dst_port = self._resolve_gate_dst_port(src_uid, src_port, dst_uid, dst_port)
-        preps = find_flip_to_free_branch_in_for_pending_connection(
-            self.current_layout_name,
-            dst_uid,
-            dst_port,
-            deps=gd,
-        )
-        if preps:
-            for flip in preps:
-                self._apply_hub_wire_flip(flip)
-            self.rebuild_index()
-            self.repair_hub_wire_directions()
         # TODO: batch UI could pass gd through to avoid a second wire_graph_deps() inside connect_*.
         wid = self.wires.connect_ports(
             self.index, self.current_layout_name, src_uid, src_port, dst_uid, dst_port
         )
         self.rebuild_index()
-        self.repair_hub_wire_directions()
         return wid
 
     def connect_ports_manual(
@@ -565,24 +581,11 @@ class LogicDiagram:
     ) -> str:
         """Manhattan path via interior bend points (DXF mm); excluded from gate-input bundle optimization only."""
         self.rebuild_index()
-        self.repair_hub_wire_directions()
-        # One deps bundle for normalize + flip search so solver inputs stay aligned.
         gd = self.wires.wire_graph_deps()
         src_uid, src_port, dst_uid, dst_port = normalize_wire_endpoints_with_deps(
             gd, src_uid, src_port, dst_uid, dst_port
         )
         dst_port = self._resolve_gate_dst_port(src_uid, src_port, dst_uid, dst_port)
-        preps = find_flip_to_free_branch_in_for_pending_connection(
-            self.current_layout_name,
-            dst_uid,
-            dst_port,
-            deps=gd,
-        )
-        if preps:
-            for flip in preps:
-                self._apply_hub_wire_flip(flip)
-            self.rebuild_index()
-            self.repair_hub_wire_directions()
         # TODO: batch UI could pass gd through to avoid a second wire_graph_deps() inside connect_*.
         wid = self.wires.connect_ports_manual(
             self.index,
@@ -594,7 +597,6 @@ class LogicDiagram:
             bend_points_dxf,
         )
         self.rebuild_index()
-        self.repair_hub_wire_directions()
         return wid
 
     def _resolve_gate_dst_port(self, src_uid: str, src_port: str, dst_uid: str, dst_port: str) -> str:
@@ -648,24 +650,9 @@ class LogicDiagram:
             e.set_points([(x, y, b) for x, y, b in reversed(pts)])
 
     def repair_hub_wire_directions(self, layout_name: str | None = None) -> int:
-        """Flip hub-incident wires whose XDATA disagrees with anchor-BFS flow or IN*→OUT*.
-
-        Uses :func:`find_hub_wire_flips` (explicit backwards + anchor BFS for hub–hub
-        edges).  Updates XDATA and reverses polyline vertex order for each flip.
-
-        Called before each new connection (repair_pre) on **existing** wires only, and
-        again after ``wires.connect_ports`` (repair_post). Does not consider a hypothetical
-        edge not yet in the document.
-
-        Returns the number of wires repaired.
-        """
-        ln = layout_name or self.current_layout_name
-        flips = find_hub_wire_flips(ln, deps=self.wires.wire_graph_deps())
-        for flip in flips:
-            self._apply_hub_wire_flip(flip)
-        if flips:
-            self.rebuild_index()
-        return len(flips)
+        """Kept for compatibility; hub-chain direction repair is not used."""
+        _ = layout_name
+        return 0
 
     def optimize_and_or_input_ports(
         self, gate_uid: str, *, routing_profile: RoutingProfile | None = None
@@ -705,6 +692,46 @@ class LogicDiagram:
         self.rebuild_index()
         return uid
 
+    def place_page_link_pair_ranked(
+        self, pos: tuple[float, float], target_layout: str, sym_ordinal: int
+    ) -> tuple[str, str]:
+        """Place PAGE_FROM/PAGE_TO pair with mutual ``peer_uid`` and shared rank; refresh both layouts."""
+        pos = snap_to_grid(*pos)
+        src = self.current_layout_name
+        x0, y0 = float(pos[0]), float(pos[1])
+        rk = int(sym_ordinal)
+        uid_from = self.symbols.place_page_link(
+            src,
+            (x0, y0),
+            target_layout,
+            self.list_pages(),
+            defer_refresh=True,
+            page_ref_rank=rk,
+        )
+        uid_to = self.symbols.place_page_link(
+            target_layout,
+            (x0 + 28.0, y0 + 22.0),
+            src,
+            self.list_pages(),
+            outgoing=False,
+            defer_refresh=True,
+            page_ref_rank=rk,
+        )
+        self.symbols.link_page_ref_peers_cross_layout(src, uid_from, target_layout, uid_to)
+        refresh_page_ref_syms_on_layout(self.doc, src)
+        refresh_page_ref_syms_on_layout(self.doc, target_layout)
+        self.rebuild_index()
+        return uid_from, uid_to
+
+    def reorder_page_refs_on_corridor(self, target_layout: str, ordered_src_side_uids: list[str]) -> None:
+        apply_ordered_page_ref_ranks_with_peers(
+            self.doc,
+            self.current_layout_name,
+            target_layout,
+            ordered_src_side_uids,
+        )
+        self.rebuild_index()
+
     def place_page_link_at(self, layout_name: str, pos: tuple[float, float], target_layout: str) -> str:
         """Place PAGE_TO on the **destination** layout (stub pointing back to *target_layout*)."""
         pos = snap_to_grid(*pos)
@@ -737,6 +764,10 @@ class LogicDiagram:
 
     def set_page_ref(self, uid: str, target_layout: str) -> None:
         self.symbols.set_page_ref(self.current_layout_name, uid, target_layout, self.list_pages())
+        self.rebuild_index()
+
+    def set_page_ref_rank(self, uid: str, rank: int) -> None:
+        self.symbols.set_page_ref_rank(self.current_layout_name, uid, rank)
         self.rebuild_index()
 
     def set_page_ref_target_info_visibility(
@@ -813,8 +844,29 @@ class LogicDiagram:
             self.rebuild_index()
         return ok
 
-    def set_user_sketch_text(self, uid: str, text: str, height_mm: float) -> bool:
-        ok = self.user_geom.set_user_text_props(self.current_layout_name, uid, text, height_mm)
+    def set_user_sketch_text(
+        self,
+        uid: str,
+        text: str,
+        height_mm: float,
+        *,
+        halign: int | None = None,
+    ) -> bool:
+        """Update USER_TEXT string, height, and optionally horizontal alignment.
+
+        Args:
+            uid: Sketch entity UID.
+            text: New displayed text.
+            height_mm: Cap height (mm).
+            halign: When not ``None``, DXF horizontal alignment (0=left, 1=center, 2=right).
+
+        Returns:
+            True if the entity was updated.
+        """
+
+        ok = self.user_geom.set_user_text_props(
+            self.current_layout_name, uid, text, height_mm, halign=halign
+        )
         if ok:
             self.rebuild_index()
         return ok

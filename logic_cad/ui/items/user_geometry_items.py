@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainterPath, QPainterPathStroker, QPen
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPainterPathStroker, QPen
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -16,9 +16,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from logic_cad.core.model.constants import LINETYPE_CONTINUOUS
+from logic_cad.core.model.constants import GRID_PITCH, LINETYPE_CONTINUOUS
 from logic_cad.core.routing import snap_to_grid
-from logic_cad.core.text.layout_resolver import build_single_line_layout
+from logic_cad.core.text.layout_resolver import NormalizedTextLayout, normalize_dxf_text_entity
 from logic_cad.ui.block_paint import paint_text_path_mm, text_path_bounds_item_local
 from logic_cad.ui.bulge_path import append_bulge_arc_to_path
 from logic_cad.ui.items.wire_item import WIRE_AXIS_HIT_WIDTH_MM, apply_dxf_linetype_to_pen, dxf_to_scene
@@ -29,7 +29,12 @@ from logic_cad.ui.scene_item.z_order import (
     CANVAS_Z_USER_LINE,
     CANVAS_Z_USER_TEXT,
 )
-from logic_cad.ui.snap_utils import dxf_from_scene_pos, scene_pos_from_dxf, user_line_end_dxf_from_scene
+from logic_cad.ui.snap_utils import (
+    dxf_from_scene_pos,
+    scene_pos_from_dxf,
+    snap_pitch_for_qgraphics_item,
+    user_line_end_dxf_from_scene,
+)
 
 
 class UserLineItem(QGraphicsLineItem):
@@ -109,7 +114,8 @@ class UserLineItem(QGraphicsLineItem):
         """Update one endpoint (grid; Shift matches new-line tool ortho). Opposite end is the anchor."""
         a, b = self.line_endpoints_dxf()
         anchor = b if index == 0 else a
-        sx, sy = user_line_end_dxf_from_scene(anchor, scene_pos, shift)
+        pitch = snap_pitch_for_qgraphics_item(self)
+        sx, sy = user_line_end_dxf_from_scene(anchor, scene_pos, shift, pitch=pitch)
         pl = self.mapFromScene(scene_pos_from_dxf(sx, sy))
         ln = self.line()
         if index == 0:
@@ -123,7 +129,8 @@ class UserLineItem(QGraphicsLineItem):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if isinstance(value, QPointF):
                 xd, yd = dxf_from_scene_pos(value)
-                sx, sy = snap_to_grid(xd, yd)
+                pitch = snap_pitch_for_qgraphics_item(self)
+                sx, sy = snap_to_grid(xd, yd, pitch)
                 value = scene_pos_from_dxf(sx, sy)
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self._moved = True
@@ -131,8 +138,8 @@ class UserLineItem(QGraphicsLineItem):
 
     def paint(self, painter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
         super().paint(painter, option, widget)
+        ln = self.line()
         if option.state & QStyle.StateFlag.State_Selected:
-            ln = self.line()
             p = QPen(QColor(90, 170, 255), 0)
             p.setCosmetic(True)
             base = self.pen()
@@ -140,6 +147,11 @@ class UserLineItem(QGraphicsLineItem):
             p.setDashPattern(base.dashPattern())
             painter.setPen(p)
             painter.drawLine(ln)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(90, 170, 255, 90))
+            grip = 0.5
+            for pt in (ln.p1(), ln.p2()):
+                painter.drawEllipse(pt, grip, grip)
 
 
 class UserCircleItem(QGraphicsEllipseItem):
@@ -182,7 +194,8 @@ class UserCircleItem(QGraphicsEllipseItem):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if isinstance(value, QPointF):
                 xd, yd = dxf_from_scene_pos(value)
-                sx, sy = snap_to_grid(xd, yd)
+                pitch = snap_pitch_for_qgraphics_item(self)
+                sx, sy = snap_to_grid(xd, yd, pitch)
                 value = scene_pos_from_dxf(sx, sy)
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self._moved = True
@@ -262,7 +275,8 @@ class UserCloudItem(QGraphicsPathItem):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if isinstance(value, QPointF):
                 xd, yd = dxf_from_scene_pos(value)
-                sx, sy = snap_to_grid(xd, yd)
+                pitch = snap_pitch_for_qgraphics_item(self)
+                sx, sy = snap_to_grid(xd, yd, pitch)
                 value = scene_pos_from_dxf(sx, sy)
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self._moved = True
@@ -282,34 +296,31 @@ class UserCloudItem(QGraphicsPathItem):
 
 
 class UserTextItem(QGraphicsItem):
-    """TEXT at DXF insert; height is cap height in mm (scene units)."""
+    """USER_TEXT (DXF TEXT): item origin is the normalized alignment anchor."""
 
     def __init__(
         self,
         sketch_uid: str,
-        ix: float,
-        iy: float,
-        text: str,
+        layout: NormalizedTextLayout,
         *,
-        height_mm: float,
-        doc: Any | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.sketch_uid = sketch_uid
-        self._layout = build_single_line_layout(
-            text=str(text or ""),
-            insert_x=float(ix),
-            insert_y=float(iy),
-            height_mm=max(0.25, float(height_mm)),
-            doc=doc,
-        )
+        self._layout = layout
         self.setPos(dxf_to_scene(self._layout.anchor_x, self._layout.anchor_y))
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setZValue(CANVAS_Z_USER_TEXT)
         self._moved = False
+
+    @classmethod
+    def from_dxf_entity(cls, sketch_uid: str, entity: Any, *, parent=None) -> "UserTextItem":
+        """Build from a layout TEXT tagged as USER_TEXT."""
+
+        lay = normalize_dxf_text_entity(entity)
+        return cls(sketch_uid, lay, parent=parent)
 
     def insert_dxf(self) -> tuple[float, float]:
         return dxf_from_scene_pos(self.pos())
@@ -318,7 +329,8 @@ class UserTextItem(QGraphicsItem):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
             if isinstance(value, QPointF):
                 xd, yd = dxf_from_scene_pos(value)
-                sx, sy = snap_to_grid(xd, yd)
+                pitch = snap_pitch_for_qgraphics_item(self)
+                sx, sy = snap_to_grid(xd, yd, pitch)
                 value = scene_pos_from_dxf(sx, sy)
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             self._moved = True
@@ -329,9 +341,12 @@ class UserTextItem(QGraphicsItem):
             self._layout.text,
             self._layout.height_mm,
             QPointF(0, 0),
-            halign=self._layout.halign,
-            valign=self._layout.valign,
-            width_fac=self._layout.width_factor,
+            rot_deg=self._layout.render_rotation_deg,
+            halign=self._layout.render_halign,
+            valign=self._layout.render_valign,
+            width_fac=self._layout.render_width_factor,
+            fit_length_mm=self._layout.render_fit_length_mm,
+            fit_mode=self._layout.render_fit_mode,
             font_family=self._layout.font_family,
             font_families=self._layout.font_families,
         )
@@ -339,15 +354,18 @@ class UserTextItem(QGraphicsItem):
             return QRectF(0, 0, 1, 1)
         return r
 
-    def paint(self, painter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
+    def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
         paint_text_path_mm(
             painter,
             self._layout.text,
             self._layout.height_mm,
             QPointF(0, 0),
-            halign=self._layout.halign,
-            valign=self._layout.valign,
-            width_fac=self._layout.width_factor,
+            rot_deg=self._layout.render_rotation_deg,
+            halign=self._layout.render_halign,
+            valign=self._layout.render_valign,
+            width_fac=self._layout.render_width_factor,
+            fit_length_mm=self._layout.render_fit_length_mm,
+            fit_mode=self._layout.render_fit_mode,
             fill=QColor(200, 200, 210),
             font_family=self._layout.font_family,
             font_families=self._layout.font_families,

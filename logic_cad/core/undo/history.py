@@ -8,7 +8,11 @@ from typing import Any
 from ezdxf.document import Drawing
 
 from logic_cad.core.model.xdata import get_uid
-from logic_cad.core.undo.entity_serialize import restore_entity_from_payload, serialize_entity
+from logic_cad.core.undo.entity_serialize import (
+    apply_serialized_payload_in_place,
+    restore_entity_from_payload,
+    serialize_entity,
+)
 
 
 @dataclass
@@ -100,7 +104,15 @@ def apply_delta(doc: Drawing, delta: DocumentDelta, *, undo: bool) -> None:
                 e = find_entity_by_uid(doc, uid)
                 if e:
                     destroy_entity(doc, e)
-            restore_entity_from_payload(doc, snap.payload)
+                restore_entity_from_payload(doc, snap.payload)
+            else:
+                e = doc.entitydb.get(snap.handle)
+                if e and getattr(e, "is_alive", True):
+                    if not apply_serialized_payload_in_place(e, snap.payload):
+                        destroy_entity(doc, e)
+                        restore_entity_from_payload(doc, snap.payload)
+                else:
+                    restore_entity_from_payload(doc, snap.payload)
     else:
         # Redo: apply forward
         for snap in delta.removed:
@@ -121,7 +133,15 @@ def apply_delta(doc: Drawing, delta: DocumentDelta, *, undo: bool) -> None:
                 e = find_entity_by_uid(doc, uid)
                 if e:
                     destroy_entity(doc, e)
-            restore_entity_from_payload(doc, snap.payload)
+                restore_entity_from_payload(doc, snap.payload)
+            else:
+                e = doc.entitydb.get(snap.handle)
+                if e and getattr(e, "is_alive", True):
+                    if not apply_serialized_payload_in_place(e, snap.payload):
+                        destroy_entity(doc, e)
+                        restore_entity_from_payload(doc, snap.payload)
+                else:
+                    restore_entity_from_payload(doc, snap.payload)
 
 
 @dataclass

@@ -13,6 +13,20 @@ def page_index_to_letters(idx: int) -> str:
     return s
 
 
+def letters_to_page_index(letters: str) -> int | None:
+    """Inverse of ``page_index_to_letters``: A→0, B→1, …; ``None`` if invalid."""
+    s = str(letters or "").strip().upper()
+    if not s:
+        return None
+    for c in s:
+        if not ("A" <= c <= "Z"):
+            return None
+    val = 0
+    for c in s:
+        val = val * 26 + (ord(c) - 64)
+    return val - 1
+
+
 def page_ref_link_label(target_layout: str, ordinal: int) -> str:
     """PAGE_REF SYM on one sheet: same *target_layout* gets ``A``, ``B``, … ``Z``, ``AA``, … (ordinal 0, 1, …)."""
     return f"{target_layout} {page_index_to_letters(ordinal)}"

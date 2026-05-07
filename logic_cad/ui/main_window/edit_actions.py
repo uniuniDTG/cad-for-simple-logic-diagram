@@ -12,17 +12,42 @@ if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
 
 
+def _block_edit_tab_active(win: MainWindow) -> bool:
+    """True when the west tab bar is on *ブロック* (symbol block editor shell)."""
+
+    return win._page_tabs.currentIndex() == 2
+
+
 def undo(win: MainWindow) -> None:
+    if _block_edit_tab_active(win):
+        sess = win._block_panel.session()
+        if sess is not None:
+            from logic_cad.core.undo.scratch_transaction import ScratchUndoDiagram, scratch_undo
+
+            if scratch_undo(ScratchUndoDiagram(sess.scratch_doc), sess.block_history):
+                win._block_scene.refresh_from_session()
+            return
     win._diagram.undo()
     win._refresh_scene()
 
 
 def redo(win: MainWindow) -> None:
+    if _block_edit_tab_active(win):
+        sess = win._block_panel.session()
+        if sess is not None:
+            from logic_cad.core.undo.scratch_transaction import ScratchUndoDiagram, scratch_redo
+
+            if scratch_redo(ScratchUndoDiagram(sess.scratch_doc), sess.block_history):
+                win._block_scene.refresh_from_session()
+            return
     win._diagram.redo()
     win._refresh_scene()
 
 
 def delete_selection(win: MainWindow) -> None:
+    if _block_edit_tab_active(win):
+        win._block_scene.delete_selected_editor_items()
+        return
     from logic_cad.ui.items.symbol_item import SymbolItem
     from logic_cad.ui.items.wire_item import WireItem
 

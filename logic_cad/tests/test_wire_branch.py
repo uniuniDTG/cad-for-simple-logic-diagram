@@ -1,4 +1,4 @@
-"""WIRE_BRANCH as INSERT endpoint node (IN0_MULTI / OUT0_MULTI) and wire lifecycle."""
+"""WIRE_BRANCH as INSERT endpoint node (INOUT0_MULTI) and wire lifecycle."""
 
 import math
 
@@ -50,12 +50,12 @@ def test_fanout_from_branch_three_outputs():
         # Slightly above d_gate obstacle top (margin) so IN port is not on bbox edge.
         br = d.place_wire_branch((34.0, 14.0))
     with d.begin("wire"):
-        d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        d.connect_ports(br, "OUT0_MULTI", b, "IN0_LOGIC")
-        d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
-        d.connect_ports(br, "OUT0_MULTI", d_gate, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        d.connect_ports(br, "INOUT0_MULTI", b, "IN0_LOGIC")
+        d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
+        d.connect_ports(br, "INOUT0_MULTI", d_gate, "IN0_LOGIC")
     d.rebuild_index()
-    n = count_wires_from_src_port(d, d.current_layout_name, br, "OUT0_MULTI")
+    n = count_wires_from_src_port(d, d.current_layout_name, br, "INOUT0_MULTI")
     assert n == 3
 
 
@@ -70,9 +70,9 @@ def test_delete_trunk_segment_wire_leaves_branch_and_other_wires():
     with d.begin("branch"):
         br = d.place_wire_branch((24.0, 12.0))
     with d.begin("wire"):
-        w_ab = d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        d.connect_ports(br, "OUT0_MULTI", b, "IN0_LOGIC")
-        w_leg = d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
+        w_ab = d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        d.connect_ports(br, "INOUT0_MULTI", b, "IN0_LOGIC")
+        w_leg = d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
     assert find_entity_by_uid(d.doc, br) is not None
     with d.begin("del"):
         d.delete_by_uid(w_ab)
@@ -90,12 +90,12 @@ def test_connect_ports_branch_to_gate_health():
     with d.begin("branch"):
         br = d.place_wire_branch((24.0, 12.0))
     with d.begin("wire"):
-        d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        d.connect_ports(br, "OUT0_MULTI", b, "IN0_LOGIC")
-        nw = d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        d.connect_ports(br, "INOUT0_MULTI", b, "IN0_LOGIC")
+        nw = d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
     xd = ld_app_dict_for_uid(d.doc, nw)
     assert xd.get("src") == br
-    assert xd.get("src_port") == "OUT0_MULTI"
+    assert xd.get("src_port") == "INOUT0_MULTI"
     assert "from_branch" not in xd
     d.rebuild_index()
     lo, geo = d.wire_connection_health(nw)
@@ -112,9 +112,9 @@ def test_symbol_move_reroutes_wires_to_branch():
     with d.begin("branch"):
         br = d.place_wire_branch((24.0, 12.0))
     with d.begin("wire"):
-        d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        d.connect_ports(br, "OUT0_MULTI", b, "IN0_LOGIC")
-        nw = d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        d.connect_ports(br, "INOUT0_MULTI", b, "IN0_LOGIC")
+        nw = d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
     d.rebuild_index()
     bx, by = insert_world_xy(d.doc, br)
     fp0 = lwpolyline_first_vertex_xy(d.doc, nw)
@@ -138,9 +138,9 @@ def test_move_wire_branch_reroutes_outgoing_wires():
     with d.begin("branch"):
         br = d.place_wire_branch((34.0, 12.0))
     with d.begin("wire"):
-        d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        d.connect_ports(br, "OUT0_MULTI", b, "IN0_LOGIC")
-        nw = d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        d.connect_ports(br, "INOUT0_MULTI", b, "IN0_LOGIC")
+        nw = d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
     d.rebuild_index()
     cx, cy = insert_world_xy(d.doc, br)
     assert d.move_wire_branch(br, (cx + GRID_PITCH, cy))
@@ -178,8 +178,8 @@ def test_delete_branch_removes_insert_and_incident_wires():
     with d.begin("branch"):
         br = d.place_wire_branch((24.0, 12.0))
     with d.begin("wire"):
-        w0 = d.connect_ports(a, "OUT0_LOGIC", br, "IN0_MULTI")
-        w1 = d.connect_ports(br, "OUT0_MULTI", c, "IN0_LOGIC")
+        w0 = d.connect_ports(a, "OUT0_LOGIC", br, "INOUT0_MULTI")
+        w1 = d.connect_ports(br, "INOUT0_MULTI", c, "IN0_LOGIC")
     with d.begin("del"):
         d.delete_by_uid(br)
     assert find_entity_by_uid(d.doc, br) is None

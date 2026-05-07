@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 from logic_cad.core.attrib_tags import is_frame_attdef_tag, is_supported_attdef_tag
 from logic_cad.core.model.constants import LAYER_CONTENTS_AREA
 from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
+from logic_cad.ui.dxf_display_color import entity_effective_linetype, entity_stroke_qcolor
+from logic_cad.ui.items.wire_item import apply_dxf_linetype_to_pen
 
 
 def _local_pt(x: float, y: float, sx: float, sy: float) -> QPointF:
@@ -761,17 +763,17 @@ def paint_block_strokes(
     scale_x: float = 1.0,
     scale_y: float = 1.0,
     flatten: float = 0.35,
+    stroke_color_override: QColor | None = None,
 ) -> bool:
     from ezdxf.path import make_path
 
     if block_name not in doc.blocks:
         return False
     blk = doc.blocks.get(block_name)
-    pen = QPen(painter.pen())
-    pen.setCosmetic(True)
-    painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
     drawn = False
+    override = stroke_color_override
+
     for ent in blk:
         layer = str(ent.dxf.layer)
         if layer == LAYER_CONTENTS_AREA:
@@ -785,6 +787,8 @@ def paint_block_strokes(
             path = make_path(ent)
         except Exception:
             continue
+        stroke_q = override if override is not None else entity_stroke_qcolor(doc, ent)
+        lt_resolved = entity_effective_linetype(doc, ent)
         if path.has_sub_paths:
             subs = list(path.sub_paths())
         else:
@@ -798,13 +802,19 @@ def paint_block_strokes(
                 continue
             if len(pts) < 2:
                 continue
-            for i in range(len(pts) - 1):
-                a = pts[i]
-                b = pts[i + 1]
-                p0 = _local_pt(float(a.x), float(a.y), scale_x, scale_y)
-                p1 = _local_pt(float(b.x), float(b.y), scale_x, scale_y)
-                painter.drawLine(p0, p1)
-                drawn = True
+            geom = QPainterPath()
+            p0 = _local_pt(float(pts[0].x), float(pts[0].y), scale_x, scale_y)
+            geom.moveTo(p0)
+            for pi in pts[1:]:
+                geom.lineTo(_local_pt(float(pi.x), float(pi.y), scale_x, scale_y))
+            painter.save()
+            pen = QPen(stroke_q, 0)
+            pen.setCosmetic(True)
+            apply_dxf_linetype_to_pen(pen, lt_resolved)
+            painter.setPen(pen)
+            painter.drawPath(geom)
+            painter.restore()
+            drawn = True
     return drawn
 
 
@@ -976,10 +986,19 @@ def paint_block_definition(
     sym_display_text: str = "",
     instance_attribs: dict[str, tuple[str, bool]] | None = None,
     sym_height_mm: float | None = None,
+    stroke_color_override: QColor | None = None,
 ) -> bool:
     """Hatches + strokes + TEXT/MTEXT + ATTDEF. Returns True if any geometry/text drawn."""
     a = paint_block_hatches(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y, flatten=flatten)
-    b = paint_block_strokes(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y, flatten=flatten)
+    b = paint_block_strokes(
+        painter,
+        doc,
+        block_name,
+        scale_x=scale_x,
+        scale_y=scale_y,
+        flatten=flatten,
+        stroke_color_override=stroke_color_override,
+    )
     c = paint_block_text_entities(painter, doc, block_name, scale_x=scale_x, scale_y=scale_y)
     d = paint_block_attdefs(
         painter,

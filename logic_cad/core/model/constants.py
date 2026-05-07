@@ -29,6 +29,7 @@ LAYER_PORT = "LD_PORT"
 # Per-port layers used by CHECKPOINT / WIRE_BRANCH blocks (must exist in ``new_document``).
 LAYER_PORT_IN0_MULTI = "LD_PORT_IN0_MULTI"
 LAYER_PORT_OUT0_MULTI = "LD_PORT_OUT0_MULTI"
+LAYER_PORT_INOUT0_MULTI = "LD_PORT_INOUT0_MULTI"
 LAYER_WIRE_LOGIC = "LD_WIRE_LOGIC"
 LAYER_WIRE_VALUE = "LD_WIRE_VALUE"
 LAYER_WIRE_COM = "LD_WIRE_COM"
@@ -72,8 +73,11 @@ PAGE_REF_SHOW_PAGE_NAME_XDATA = "show_page_name"
 PAGE_REF_SHOW_PAGE_DESC_XDATA = "show_page_desc"
 # Legacy PAGE_REF XDATA key: when "1", both PAGE_NAME/PAGE_DESC are treated as visible.
 PAGE_REF_SHOW_TARGET_INFO_XDATA = "show_target_info"
+# PAGE_REF: optional manual ordinal key shared by paired PAGE_FROM ↔ PAGE_TO INSERTs on the S↔T corridor.
+PAGE_REF_RANK_XDATA = "page_ref_rank"
 
 # INPAGE_REF: paired INSERTs on one sheet; peer INSERT uid
+# PAGE_REF cross-page pairing reuses this key as well (see page_ref/link helpers).
 PEER_UID_XDATA = "peer_uid"
 
 # Footnote-style in-page link markers (※1, ※2, …)
@@ -116,7 +120,7 @@ WIRE_BRANCH_RADIUS_MM = 0.5
 # TOC row cell size (mm) — matches default blocks in generate/frame_template.py
 CONTENTS_CELL_WIDTH_MM = 60.0
 CONTENTS_CELL_HEIGHT_MM = 8.0
-CONTENTS_CELL_COL_GAP_MM = 0.0
+CONTENTS_CELL_COL_GAP_MM = 10.0
 CONTENTS_CELL_ROW_GAP_MM = 0.0
 # Default TOC table area (mm) when ``LD_CONTENTS_AREA`` is missing on a sheet
 CONTENTS_AREA_DEFAULT_MINX_MM = 31.36
@@ -129,6 +133,7 @@ ALL_LAYERS = (
     LAYER_PORT,
     LAYER_PORT_IN0_MULTI,
     LAYER_PORT_OUT0_MULTI,
+    LAYER_PORT_INOUT0_MULTI,
     LAYER_WIRE_LOGIC,
     LAYER_WIRE_VALUE,
     LAYER_WIRE_COM,
@@ -158,6 +163,16 @@ ALL_LAYERS = (
 
 # Default grid (mm)
 GRID_PITCH = 1.0
+
+# Block definition editor: selectable auxiliary snap/grid pitches (mm), coarse -> fine.
+BLOCK_EDIT_AUX_GRID_PITCH_OPTIONS_MM = (0.5, 0.2, 0.1)
+BLOCK_EDIT_AUX_GRID_DEFAULT_PITCH_MM = 0.1
+# Minimum half-extent (mm) of block-edit scene rect around origin so middle-button pan has scroll range.
+BLOCK_EDIT_MIN_SCENE_HALF_MM = 250.0
+# Default zoom-on-open: framing around insertion origin (−half … +half mm per axis).
+BLOCK_EDIT_INITIAL_VIEW_HALF_MM = 20.0
+# Backward-compatible alias used by existing code paths/tests.
+BLOCK_EDIT_SNAP_PITCH_MM = BLOCK_EDIT_AUX_GRID_DEFAULT_PITCH_MM
 
 # User-placed annotation TEXT height (default when sketch/text tools use this constant)
 USER_TEXT_DEFAULT_HEIGHT_MM = 2.0
@@ -232,7 +247,7 @@ PAGE_LINK_HEIGHT_MM = 3.0  # slightly taller than 2.4
 BLOCK_PAGE_TO = "PAGE_TO"
 BLOCK_PAGE_FROM = "PAGE_FROM"
 
-# Relay node: two WIREs (into IN0_MULTI, out of OUT0_MULTI); block is POINT-only in DXF.
+# Relay node: IN/OUT single-port for CHECKPOINT and WIRE_BRANCH variants.
 BLOCK_CHECKPOINT = "LD_CHECKPOINT"
 ENTITY_TYPE_CHECKPOINT = "CHECKPOINT"
 # Editor-only marker drawn over CHECKPOINT inserts (mm radius).

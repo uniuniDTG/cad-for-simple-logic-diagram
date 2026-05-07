@@ -60,6 +60,35 @@ def is_find_replace_attrib_tag(tag: str) -> bool:
     return bool(_LABEL_ATTDEF_RE.match(t))
 
 
+def symbol_editor_attdef_tag_choices() -> tuple[str, ...]:
+    """Tags allowed in symbol block ATTDEF picker: ``SYM``, ``LABEL{{n}}``, ``STATIC_LABEL{{n}}`` only."""
+
+    out: list[str] = ["SYM"]
+    for i in range(24):
+        out.append(f"LABEL{i}")
+    for i in range(16):
+        out.append(f"STATIC_LABEL{i}")
+    return tuple(out)
+
+
+def symbol_editor_attdef_tag_choices_unused_in_block(block) -> tuple[str, ...]:
+    """Same as :func:`symbol_editor_attdef_tag_choices` but omitting tags already used by an ATTDEF in *block*.
+
+    Args:
+        block: ezdxf block layout (iterable of entities).
+
+    Returns:
+        Tags not yet present as ATTDEF in the block (case-insensitive).
+    """
+
+    used: set[str] = set()
+    for ent in block:
+        if ent.dxftype() != "ATTDEF":
+            continue
+        used.add(str(ent.dxf.tag).strip().upper())
+    return tuple(t for t in symbol_editor_attdef_tag_choices() if str(t).strip().upper() not in used)
+
+
 def list_editable_text_attdef_tags(doc: Drawing, block_name: str) -> list[str]:
     """TAG matching LABEL{n} or STATIC_LABEL{n} in block definition (sorted by family, then n)."""
     if block_name not in doc.blocks:

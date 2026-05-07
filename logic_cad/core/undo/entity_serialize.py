@@ -10,6 +10,8 @@ from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity
 from ezdxf.entities import DXFGraphic
 
+from logic_cad.core.model.constants import APPID
+
 
 def _to_plain(value: Any) -> Any:
     """Make DXF attribute values JSON-friendly for snapshot compare."""
@@ -39,6 +41,32 @@ def _restore_dxfattribs_layer_linetype_color(att: dict[str, Any], *, layer_defau
     if co is not None:
         da["color"] = co
     return da
+
+
+def _apply_text_like_fields_from_dxfattribs_snapshot(entity: DXFEntity, att: dict[str, Any]) -> None:
+    """Restore alignment / style from serialized :func:`_serialize_dxfattribs` dict.
+
+    :func:`serialize_entity` stores full ``entity.dxf.*`` in ``payload['dxfattribs']``, but
+    :func:`restore_entity_from_payload` recreates TEXT/ATTDEF with only a subset; callers
+    must merge these so center/right ATTDEF survive block merge (scratch → main).
+    """
+
+    for key in ("halign", "valign", "width", "oblique", "style", "generation_flags"):
+        if key not in att:
+            continue
+        try:
+            setattr(entity.dxf, key, att[key])
+        except AttributeError:
+            pass
+    alp = att.get("align_point")
+    if alp is None:
+        return
+    try:
+        if isinstance(alp, (list, tuple)) and len(alp) >= 2:
+            z = float(alp[2]) if len(alp) > 2 else 0.0
+            entity.dxf.align_point = (float(alp[0]), float(alp[1]), z)
+    except (AttributeError, TypeError, ValueError):
+        pass
 
 
 @dataclass(frozen=True)
@@ -200,12 +228,96 @@ def _target_block(doc: Drawing, owner: OwnerRef | None):
     return doc.modelspace()
 
 
+def apply_serialized_payload_in_place(entity: DXFEntity, payload: dict[str, Any]) -> bool:
+    """Mutate *entity* in place to match *payload* (same handle). Used for undo/redo of entities without LD_APP uid.
+
+    Returns:
+        True when applied; False if the entity type is not supported (caller may fall back to delete+recreate).
+    """
+    et = payload.get("dxftype")
+    if entity.dxftype() != et:
+        return False
+    att = payload.get("dxfattribs") or {}
+    geom = payload.get("geometry") or {}
+    if "layer" in att:
+        entity.dxf.layer = str(att["layer"])
+    if "color" in att and att["color"] is not None:
+        entity.dxf.color = int(att["color"])
+    lt = att.get("linetype")
+    if lt is not None:
+        entity.dxf.linetype = str(lt)
+    if et == "POINT":
+        loc = geom.get("location")
+        if not loc or len(loc) < 2:
+            return False
+        z = float(loc[2]) if len(loc) > 2 else 0.0
+        entity.dxf.location = (float(loc[0]), float(loc[1]), z)
+        entity.discard_xdata(APPID)  # type: ignore[arg-type]
+        if payload.get("xdata_ld_app"):
+            _apply_xdata(entity, payload["xdata_ld_app"])
+        return True
+    if et == "LINE":
+        s, e_ = geom.get("start"), geom.get("end")
+        if not s or not e_ or len(s) < 2 or len(e_) < 2:
+            return False
+        sz = float(s[2]) if len(s) > 2 else 0.0
+        ez = float(e_[2]) if len(e_) > 2 else 0.0
+        entity.dxf.start = (float(s[0]), float(s[1]), sz)
+        entity.dxf.end = (float(e_[0]), float(e_[1]), ez)
+        entity.discard_xdata(APPID)  # type: ignore[arg-type]
+        if payload.get("xdata_ld_app"):
+            _apply_xdata(entity, payload["xdata_ld_app"])
+        return True
+    if et == "CIRCLE":
+        c = geom.get("center")
+        if not c or len(c) < 2:
+            return False
+        cz = float(c[2]) if len(c) > 2 else 0.0
+        entity.dxf.center = (float(c[0]), float(c[1]), cz)
+        entity.dxf.radius = float(geom.get("radius", 0.0))
+        entity.discard_xdata(APPID)  # type: ignore[arg-type]
+        if payload.get("xdata_ld_app"):
+            _apply_xdata(entity, payload["xdata_ld_app"])
+        return True
+    if et == "ARC":
+        c = geom.get("center")
+        if not c or len(c) < 2:
+            return False
+        cz = float(c[2]) if len(c) > 2 else 0.0
+        entity.dxf.center = (float(c[0]), float(c[1]), cz)
+        entity.dxf.radius = float(geom.get("radius", 0.0))
+        entity.dxf.start_angle = float(geom.get("start_angle", 0.0))
+        entity.dxf.end_angle = float(geom.get("end_angle", 0.0))
+        entity.discard_xdata(APPID)  # type: ignore[arg-type]
+        if payload.get("xdata_ld_app"):
+            _apply_xdata(entity, payload["xdata_ld_app"])
+        return True
+    if et == "LWPOLYLINE":
+        pts_xyb = geom.get("points_xyb") or []
+        pts = geom.get("points") or []
+        try:
+            if pts_xyb:
+                entity.set_points(pts_xyb, format="xyb")
+            elif len(pts) >= 2:
+                entity.set_points(pts, format="xy")
+            else:
+                return False
+        except Exception:
+            return False
+        if "closed" in geom:
+            entity.closed = bool(geom["closed"])
+        entity.discard_xdata(APPID)  # type: ignore[arg-type]
+        if payload.get("xdata_ld_app"):
+            _apply_xdata(entity, payload["xdata_ld_app"])
+        return True
+    return False
+
+
 def _apply_xdata(entity: DXFEntity, xdata_tags: list[tuple[int, str]] | None) -> None:
     if not xdata_tags:
         return
     from ezdxf.lldxf.tags import Tags
     from ezdxf.lldxf.types import DXFTag
-    from logic_cad.core.model.constants import APPID
 
     tags = Tags()
     for code, val in xdata_tags:
@@ -317,6 +429,7 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
             dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
         )
         entity.dxf.insert = g["insert"][:2]
+        _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
     elif et == "ATTDEF":
         g = geom
         entity = blk.add_attdef(
@@ -325,8 +438,9 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
             insert=g["insert"][:2],
             height=g["height"],
             rotation=g.get("rotation", 0),
-            dxfattribs={"layer": att.get("layer", "0")},
+            dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
         )
+        _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
     else:
         return None
 

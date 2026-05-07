@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from ezdxf.document import Drawing
@@ -10,11 +9,10 @@ from ezdxf.math import Vec3
 
 from logic_cad.core.model.connection_graph import ConnectionGraph
 from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT, ENTITY_TYPE_WIRE_BRANCH
+from logic_cad.core.model.port_key import is_input_port_key, parse_port_layer
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
 from logic_cad.core.services.dynamic_gate_factory import gate_view_geometry_from_block_name
-
-_PORT_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI|COM)$")
 
 
 def _world_manhattan_escape(
@@ -120,14 +118,12 @@ class IndexStore:
             if ent.dxftype() != "POINT":
                 continue
             layer = ent.dxf.layer
-            m = _PORT_RE.match(layer)
-            if not m:
+            parsed = parse_port_layer(str(layer))
+            if parsed is None:
                 continue
-            direction, idx_s, unit = m.group(1), m.group(2), m.group(3)
-            idx = int(idx_s)
             loc = ent.dxf.location
             w = mat.transform(Vec3(float(loc.x), float(loc.y), float(loc.z)))
-            key = self.port_key(direction, idx, unit)
+            key = self.port_key(parsed.direction, parsed.index, parsed.unit)
             self.ports[(ins_uid, key)] = (float(w.x), float(w.y))
             self.port_block_local[(ins_uid, key)] = (float(loc.x), float(loc.y))
 
@@ -199,7 +195,7 @@ class IndexStore:
             return None
         bname = str(ins.dxf.name)
         geo = gate_view_geometry_from_block_name(bname)
-        if geo is None or not port_key.startswith("IN"):
+        if geo is None or not is_input_port_key(port_key):
             return None
         local = self.port_block_local.get((ins_uid, port_key))
         if local is None:

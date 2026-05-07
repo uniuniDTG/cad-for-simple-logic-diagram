@@ -8,8 +8,18 @@ from logic_cad.core.model.constants import (
 )
 from logic_cad.core.dxf.dxf_repository import new_document
 from logic_cad.core.pages.page_layout_meta import merge_layout_page_xdata
-from logic_cad.core.pages.page_labels import page_ref_link_label, page_symbol_label
-from logic_cad.core.pages.page_ref import page_link_picker_label, refresh_all_page_ref_syms
+from logic_cad.core.pages.page_labels import (
+    letters_to_page_index,
+    page_index_to_letters,
+    page_ref_link_label,
+    page_symbol_label,
+)
+from logic_cad.core.pages.page_ref import (
+    apply_ordered_page_ref_ranks_with_peers,
+    page_link_picker_label,
+    refresh_all_page_ref_syms,
+    refresh_page_ref_syms_on_layout,
+)
 from logic_cad.core.services.layout_service import LayoutService, ensure_cross_page_reference_blocks
 from logic_cad.core.services.symbol_service import SymbolService
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory
@@ -154,3 +164,71 @@ def test_refresh_all_page_ref_syms_keeps_toggle_and_updates_desc() -> None:
     assert not bool(a_desc.dxf.invisible)
     assert bool(a_name.dxf.invisible)
 
+
+def test_letters_inverse_roundtrip() -> None:
+    for idx in range(160):
+        s = page_index_to_letters(idx)
+        assert letters_to_page_index(s) == idx
+
+
+def test_page_link_picker_matches_geom_sym_letters_when_editing() -> None:
+    doc = new_document()
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("102")
+    pages = ls.list_pages()
+    ss = SymbolService(doc, DynamicGateFactory())
+    u0 = ss.place_page_link(first, (10.0, 20.0), "102", pages)
+    u1 = ss.place_page_link(first, (30.0, 20.0), "102", pages)
+    lbl0 = page_link_picker_label(doc, first, "102", exclude_uid=u0)
+    lbl1 = page_link_picker_label(doc, first, "102", exclude_uid=u1)
+    assert "(" + page_index_to_letters(0) + ")" in lbl0
+    assert "(" + page_index_to_letters(1) + ")" in lbl1
+
+
+def test_apply_ordered_ranks_swaps_symbols() -> None:
+    doc = new_document()
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("102")
+    pages = ls.list_pages()
+    ss = SymbolService(doc, DynamicGateFactory())
+    u0 = ss.place_page_link(first, (10.0, 20.0), "102", pages)
+    u1 = ss.place_page_link(first, (30.0, 20.0), "102", pages)
+
+    apply_ordered_page_ref_ranks_with_peers(doc, first, "102", [u1, u0])
+
+    def _sym(uid: str) -> str | None:
+        ins = ss.insert_by_uid(first, uid)
+        assert ins is not None
+        xd = read_ld_app_dict(ins)
+        for a in ins.attribs:
+            if str(a.dxf.tag).upper() == "SYM":
+                return str(a.dxf.text or "")
+        return xd.get("sym")
+
+    assert _sym(u0) == "102 B"
+    assert _sym(u1) == "102 A"
+
+
+def test_place_peer_cross_layout_matching_suffix() -> None:
+    doc = new_document()
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("ZPAGE")
+    pages = ls.list_pages()
+    ss = SymbolService(doc, DynamicGateFactory())
+    rk = 4
+    uf = ss.place_page_link(first, (5.0, 10.0), "ZPAGE", pages, defer_refresh=True, page_ref_rank=rk)
+    ut = ss.place_page_link("ZPAGE", (5.0, 12.0), first, pages, outgoing=False, defer_refresh=True, page_ref_rank=rk)
+    ss.link_page_ref_peers_cross_layout(first, uf, "ZPAGE", ut)
+    refresh_page_ref_syms_on_layout(doc, first)
+    refresh_page_ref_syms_on_layout(doc, "ZPAGE")
+    xf = read_ld_app_dict(ss.insert_by_uid(first, uf))
+    xt = read_ld_app_dict(ss.insert_by_uid("ZPAGE", ut))
+    want_letter = page_index_to_letters(rk)
+    assert xf.get("sym") == f"ZPAGE {want_letter}"
+    assert xt.get("sym") == f"{first} {want_letter}"

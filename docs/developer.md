@@ -8,14 +8,18 @@
 - 図枠テンプレートの明示パス適用・置き換え: `logic_cad/core/services/layout_service.py`（`apply_frame_template_from_path`）
 - 目次（TOC）フォールバック: `logic_cad/core/services/toc_frame_service.py`（`--debug` か root logger が `INFO` 以下のとき）
 - ステータスバー: キャンバス上のカーソル位置を DXF 図面座標 (mm) で表示。シーン座標は `dxf_from_scene_pos`（`logic_cad/ui/snap_utils.py`）で mm に変換
+- **インアプリ・ブロック編集（BEDIT 風）**: 左タブ「ブロック」。編集は **スクラッチ `Drawing`**（`BlockEditSession` / `logic_cad/core/services/block_edit_session.py`）上で行い、**本体へ適用**で `doc.blocks[name]` の中身を差し替え。**適用はメインの `HistoryService` に積まない**（スクラッチ側の Undo のみ）。新規/開く/閉じる/図枠・シンボルライブラリ操作は `BlockEditPanel.request_end_session_for_nav` で先にセッション終了。**同一 `LD_PORT_*` レイヤへの POINT 重複は禁止**（`block_edit_helpers.port_layer_is_taken`）。キャンバス実装: `logic_cad/ui/symbol_block_editor/`
 - 起動引数: `logic_cad/app/main.py`
 - ルーティングプロファイルの env 上書き: `logic_cad/core/routing/profile.py`（`apply_routing_env_overrides`）
 - シンボル移動後の再配線の区間計測: `logic_cad/core/debug/routing_perf.py`（`LOGIC_CAD_PERF_ROUTING=1`）
 - キャンバス上の QGraphicsItem の Z 順（ヒットテスト・重なり）: `logic_cad/ui/scene_item/z_order.py`（ルーティング一時オーバーレイの 10000 台は同ファイル docstring のとおり別帯）
-- OSNAP（限定実装）: `logic_cad/ui/scene_item/osnap.py`（`LD_PORT` のみ対象。自動配線時のみ有効で、それ以外は `snap_to_grid`）
+- OSNAP（限定実装）: `logic_cad/ui/scene_item/osnap.py`（`LD_PORT` のみ対象。配線モード（自動/手動）でポートスナップに利用、それ以外は `snap_to_grid`）
+- ポートキー解析（IN/OUT/INOUT）: `logic_cad/core/model/port_key.py`（`startswith("IN")` のような曖昧判定を避ける）
+- `WIRE_BRANCH` ポート仕様: `INOUT0_MULTI` 単一ポート（多接続可）。`scene.py` のクリック正規化、`port_src_dst_solver.py` の制約、`symbol_item.py` の丸色判定（3本以上で白）を合わせて更新する。
 - ユーザー直線ツール: ツールバーの直線ボタンを右クリックすると、次に描く線の線種（CONTINUOUS / DASHED / CENTER）を選べる。状態は `DiagramScene` の `user_sketch_line_default_linetype` / `set_user_sketch_line_default_linetype`
 - 文字列の検索・置換: `logic_cad/core/services/text_find_replace.py`（`TextSearchHit` / `list_text_search_hits`、対象は `SYM` / `LABEL*` と `USER_TEXT` 等）。`logic_cad/ui/text_search_navigate.py`（`apply_text_search_hit`）。UI: `find_replace_dialog.py`、Ctrl+F で**非モーダル**検索（前検索 / 次検索 / キャンセル、F3 / Shift+F3、パネル非表示時もメインにフォーカスがあれば可）。**検索語と各オプションは図面に保存されない**（セッション内の UI メモリのみ）。Ctrl+R はモーダル置換
 - **アプリのユーザ設定（図面外）**: **ファイル** → **ユーザ設定…**。永続化は `logic_cad/ui/app_user_settings.py` の `QSettings`（**Ini 形式**）。起動時に `logic_cad/app/main.py` で `QApplication.setOrganizationName("LogicCAD")` / `setApplicationName("Logic CAD")` を設定しているため、保存先は OS の既定ユーザ設定ディレクトリ配下の `.ini`（例: Windows では `%LOCALAPPDATA%` 系。実際のパスは実行時に `QSettings.fileName()` で確認可能）。クロスヘアは `DiagramView` がビューポート座標でオーバーレイ描画（`none` / `full` / `local`）。**レガシー Ini の `mode=both` は読み込み時に `full` として扱う**（保存はされない）。交点の中空□は Ini キー `crosshair/center_box_side_px`（0＝□なし、十字のみ）。
+- メインウィンドウのタイトルバー表示（`Logic CAD vX.Y.Z ...`）: `logic_cad/core/model/constants.py` の `APP_DISPLAY_NAME_WITH_VERSION` を `logic_cad/ui/main_window/document_actions.py` の `build_window_title` が参照して組み立てる。
 - UIログウィンドウ: **表示** → **ログ…**。`logic_cad/ui/logging/log_store.py` が `stdout/stderr` をプロセス内でキャプチャし、`logic_cad/ui/panels/log_window_dialog.py` が `QPlainTextEdit` へタイマー間引き（既定 80ms）で反映する。大量出力時の負荷を抑えるため、履歴はリングバッファ（既定 10,000 行）に制限される。
 
 ---
@@ -27,8 +31,11 @@
 | **`--debug`** | 起動時に root logger を `DEBUG` に設定し、詳細ログ（ルーティング verbose 含む）を有効化する。 |
 | **`--routing-manhattan-only`** | デバッグ用。`LOGIC_CAD_ROUTING_OVG=0` を設定し、固定マンハッタン段のみ試す（OVG マルチを無効化）。 |
 | **`--routing-ovg-only`** | デバッグ用。`LOGIC_CAD_ROUTING_FIXED=0` を設定し、OVG マルチのみ試す。 |
+| **`--show-routing-bbox`** | デバッグ用。`LOGIC_CAD_SHOW_ROUTING_BBOX=1` を設定し、シーン上に routing 障害物AABB（ベース障害物）を半透明オーバーレイ表示する。 |
+| **`--show-connect-bbox`** | デバッグ用。`LOGIC_CAD_SHOW_CONNECT_BBOX=1` を設定し、配線モード中の接続ポート切り欠き（`access_ports`）反映後 AABB を半透明オーバーレイ表示する。 |
 
 `--routing-manhattan-only` と `--routing-ovg-only` は同時に指定できません。
+`--show-routing-bbox` と `--show-connect-bbox` は同時指定でき、色分けで比較できます。
 
 ---
 

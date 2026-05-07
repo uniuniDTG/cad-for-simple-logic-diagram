@@ -148,7 +148,6 @@ class SymbolLibraryDialog(QDialog):
         self._tiles.clear()
 
         fixed: list[tuple[str, str]] = [
-            ("NOT", "block:NOT"),
             ("AND", "kind:AND"),
             ("OR", "kind:OR"),
             ("チェックポイント", "kind:CHECKPOINT"),
@@ -169,8 +168,6 @@ class SymbolLibraryDialog(QDialog):
 
         blocks = list_palette_block_names(doc)
         for name in blocks:
-            if name.upper() == "NOT":
-                continue
             payload = f"block:{name}"
             tile = _DraggableTile(doc, name, payload, parent=self._grid_widget)
             self._grid.addWidget(tile, row, col)

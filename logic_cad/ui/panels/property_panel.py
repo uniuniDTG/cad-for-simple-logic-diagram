@@ -16,16 +16,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from logic_cad.core.attrib_tags import list_editable_text_attdef_tags
+from logic_cad.core.attrib_tags import list_editable_text_attdef_tags, symbol_editor_attdef_tag_choices
 from logic_cad.core.model.constants import (
     ENTITY_TYPE_INPAGE_REF,
     INPAGE_SYM_HEIGHT_MM,
-    PEER_UID_XDATA,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
@@ -35,9 +35,20 @@ from logic_cad.core.model.constants import (
     LINETYPE_VALUE,
     WIRE_XDATA_SHOW_IN_ARROW,
 )
+from logic_cad.core.model.port_key import (
+    is_inout_port_key,
+    is_input_port_key,
+    is_output_port_key,
+    parse_port_key,
+)
 from logic_cad.core.undo.history import find_entity_by_uid
-from logic_cad.core.pages.page_labels import page_ref_link_label
-from logic_cad.core.pages.page_ref import count_page_refs_to_target, page_link_picker_label
+from logic_cad.core.pages.page_labels import page_index_to_letters, page_ref_link_label
+from logic_cad.core.pages.page_layout_meta import read_page_meta
+from logic_cad.core.pages.page_ref import (
+    page_ref_allowed_sym_ordinals_for_property_edit,
+    page_ref_ordinal_for_uid,
+    page_ref_stored_rank,
+)
 from logic_cad.core.model.user_sketch_layers import user_sketch_display_linetype_for_entity
 from logic_cad.core.model.wire_port_helpers import (
     wire_allows_orthogonal_cross,
@@ -46,20 +57,37 @@ from logic_cad.core.model.wire_port_helpers import (
 from logic_cad.core.uid_display import format_uid_display
 from logic_cad.core.model.xdata import read_ld_app_dict
 
+from logic_cad.core.model.port_key import parse_port_layer
+from logic_cad.core.services.block_edit_helpers import (
+    make_port_layer_name,
+    set_native_line_linetype_in_block,
+    set_scratch_user_sketch_linetype,
+    update_scratch_attdef_fields,
+    update_scratch_port_layer,
+)
+
 if TYPE_CHECKING:
     from logic_cad.core.logic_diagram import LogicDiagram
+    from logic_cad.core.services.block_edit_session import BlockEditSession
 
 
 def _port_sort_key(pk: str) -> tuple[int, str]:
-    if pk.startswith("IN"):
+    parsed = parse_port_key(pk)
+    if parsed is None:
+        return (3, pk)
+    if parsed.direction == "IN":
         return (0, pk)
-    if pk.startswith("OUT"):
+    if parsed.direction == "INOUT":
         return (1, pk)
-    return (2, pk)
+    if parsed.direction == "OUT":
+        return (2, pk)
+    return (3, pk)
 
 
 class PropertyPanel(QWidget):
-    _NONE, _MULTI, _SYM, _GATE, _PAGE, _INPAGE, _WIRE, _WIRE_BRANCH, _USER_SK = range(9)
+    _NONE, _MULTI, _SYM, _GATE, _PAGE, _INPAGE, _WIRE, _WIRE_BRANCH, _USER_SK, _BLOCK_PORT, _BLOCK_GEOM, _BLOCK_ATTDEF = range(
+        12
+    )
 
     def __init__(
         self,
@@ -67,12 +95,21 @@ class PropertyPanel(QWidget):
         on_applied: Callable[[], None],
         *,
         on_align_selected: Callable[[str], None] | None = None,
+        get_block_edit_session: Callable[[], BlockEditSession | None] | None = None,
+        on_block_scratch_applied: Callable[[], None] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._get_diagram = get_diagram
         self._on_applied = on_applied
         self._on_align_selected = on_align_selected
+        self._get_block_edit_session = get_block_edit_session
+        self._on_block_scratch_applied = on_block_scratch_applied
+        self._be_geom_lt_subject: str = ""
+        self._be_geom_lt_handle: str = ""
+        self._be_geom_lt_sketch_uid: str | None = None
+        self._be_attdef_handle: str = ""
+        self._be_port_edit_handle: str = ""
         self._uid: str | None = None
         self._wire_uid: str | None = None
         self._wire_branch_uid: str | None = None
@@ -193,17 +230,22 @@ class PropertyPanel(QWidget):
         fp.addRow("UUID", self._page_meta_uid)
         fp.addRow("ブロック名", self._page_meta_block)
         fp.addRow("タイプ", self._page_meta_type)
-        self._page_target = QComboBox()
+        self._page_ref_target_layout = ""
+        self._page_target_label = QLabel()
+        self._page_target_label.setWordWrap(True)
+        self._page_target_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._page_ref_rank_combo = QComboBox()
+        self._page_ref_rank_combo.currentIndexChanged.connect(self._on_page_ref_rank_combo_changed)
         self._sym_page = QLineEdit()
         self._sym_page.setReadOnly(True)
         self._page_show_page_name = QCheckBox()
         self._page_show_page_name.setChecked(False)
         self._page_show_page_desc = QCheckBox()
         self._page_show_page_desc.setChecked(False)
-        self._page_target.currentIndexChanged.connect(self._on_page_target_changed)
         btn_page = QPushButton("適用")
         btn_page.clicked.connect(self._apply_page_ref)
-        fp.addRow("リンク先ページ", self._page_target)
+        fp.addRow("リンク先ページ", self._page_target_label)
+        fp.addRow("付番", self._page_ref_rank_combo)
         fp.addRow("表示名（リンク先・自動）", self._sym_page)
         fp.addRow("PAGE_NAME を表示", self._page_show_page_name)
         fp.addRow("PAGE_DESC を表示", self._page_show_page_desc)
@@ -345,13 +387,109 @@ class PropertyPanel(QWidget):
         self._usk_h.setRange(0.25, 80.0)
         self._usk_h.setSingleStep(0.25)
         self._usk_h.setSuffix(" mm")
+        self._usk_halign = QComboBox()
+        self._usk_halign.addItem("左", 0)
+        self._usk_halign.addItem("中央", 1)
+        self._usk_halign.addItem("右", 2)
         ftx.addRow("文字列", self._usk_txt)
         ftx.addRow("文字高さ", self._usk_h)
+        ftx.addRow("水平揃え", self._usk_halign)
         fus.addWidget(self._usk_row_txt)
         btn_usk = QPushButton("適用")
         btn_usk.clicked.connect(self._apply_user_sketch)
         fus.addWidget(btn_usk)
         fus.addStretch()
+
+        self._page_block_port = QWidget()
+        fbp = QFormLayout(self._page_block_port)
+        self._be_port_block = QLineEdit()
+        self._be_port_block.setReadOnly(True)
+        self._be_port_handle = QLineEdit()
+        self._be_port_handle.setReadOnly(True)
+        self._be_port_layer_preview = QLabel("—")
+        self._be_port_layer_preview.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._be_port_dir = QComboBox()
+        self._be_port_dir.addItems(["IN", "OUT", "INOUT"])
+        self._be_port_idx = QSpinBox()
+        self._be_port_idx.setRange(0, 99)
+        self._be_port_idx.setStyleSheet("QSpinBox { padding-right: 15px; }")
+        self._be_port_unit = QComboBox()
+        self._be_port_unit.addItems(["LOGIC", "VALUE", "MULTI", "COM"])
+        self._be_port_dir.currentIndexChanged.connect(self._sync_be_port_layer_preview)
+        self._be_port_idx.valueChanged.connect(self._sync_be_port_layer_preview)
+        self._be_port_unit.currentIndexChanged.connect(self._sync_be_port_layer_preview)
+        self._be_port_x = QLineEdit()
+        self._be_port_x.setReadOnly(True)
+        self._be_port_y = QLineEdit()
+        self._be_port_y.setReadOnly(True)
+        self._be_port_apply = QPushButton("ポート属性を適用")
+        self._be_port_apply.clicked.connect(self._apply_block_edit_port)
+        fbp.addRow("ブロック", self._be_port_block)
+        fbp.addRow("ハンドル", self._be_port_handle)
+        fbp.addRow("ポート方向", self._be_port_dir)
+        fbp.addRow("ポート番号", self._be_port_idx)
+        fbp.addRow("ポート単位", self._be_port_unit)
+        fbp.addRow("レイヤ（適用結果）", self._be_port_layer_preview)
+        fbp.addRow("X (mm)", self._be_port_x)
+        fbp.addRow("Y (mm)", self._be_port_y)
+        fbp.addRow(self._be_port_apply)
+
+        self._page_block_geom = QWidget()
+        fbg = QFormLayout(self._page_block_geom)
+        self._be_geom_block = QLineEdit()
+        self._be_geom_block.setReadOnly(True)
+        self._be_geom_type = QLineEdit()
+        self._be_geom_type.setReadOnly(True)
+        self._be_geom_handle = QLineEdit()
+        self._be_geom_handle.setReadOnly(True)
+        self._be_geom_layer = QLineEdit()
+        self._be_geom_layer.setReadOnly(True)
+        self._be_geom_detail = QLabel()
+        self._be_geom_detail.setWordWrap(True)
+        self._be_geom_detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        fbg.addRow("ブロック", self._be_geom_block)
+        fbg.addRow("図形", self._be_geom_type)
+        fbg.addRow("ハンドル", self._be_geom_handle)
+        fbg.addRow("レイヤ", self._be_geom_layer)
+        fbg.addRow("内容", self._be_geom_detail)
+        self._be_geom_lt_wrap = QWidget()
+        flt_be = QFormLayout(self._be_geom_lt_wrap)
+        flt_be.setContentsMargins(0, 0, 0, 0)
+        self._be_geom_lt = QComboBox()
+        self._be_geom_lt.addItems(["CONTINUOUS", "DASHED", "CENTER"])
+        self._be_geom_lt_apply = QPushButton("線種を適用")
+        self._be_geom_lt_apply.clicked.connect(self._apply_block_edit_linetype)
+        flt_be.addRow("線種", self._be_geom_lt)
+        flt_be.addRow(self._be_geom_lt_apply)
+        fbg.addRow(self._be_geom_lt_wrap)
+        self._be_geom_lt_wrap.hide()
+
+        self._page_block_attdef = QWidget()
+        fba = QFormLayout(self._page_block_attdef)
+        self._be_att_block = QLineEdit()
+        self._be_att_block.setReadOnly(True)
+        self._be_att_handle = QLineEdit()
+        self._be_att_handle.setReadOnly(True)
+        self._be_att_tag = QComboBox()
+        self._be_att_tag.setEditable(False)
+        self._be_att_default = QLineEdit()
+        self._be_att_h = QDoubleSpinBox()
+        self._be_att_h.setRange(0.25, 80.0)
+        self._be_att_h.setSingleStep(0.25)
+        self._be_att_h.setSuffix(" mm")
+        self._be_att_halign = QComboBox()
+        self._be_att_halign.addItem("左", 0)
+        self._be_att_halign.addItem("中央", 1)
+        self._be_att_halign.addItem("右", 2)
+        self._be_att_apply = QPushButton("適用")
+        self._be_att_apply.clicked.connect(self._apply_block_edit_attdef)
+        fba.addRow("ブロック", self._be_att_block)
+        fba.addRow("ハンドル", self._be_att_handle)
+        fba.addRow("タグ", self._be_att_tag)
+        fba.addRow("既定テキスト", self._be_att_default)
+        fba.addRow("文字高さ", self._be_att_h)
+        fba.addRow("水平揃え", self._be_att_halign)
+        fba.addRow(self._be_att_apply)
 
         for w in (
             self._page_none,
@@ -363,6 +501,9 @@ class PropertyPanel(QWidget):
             self._page_wire,
             self._page_wire_branch,
             self._page_user_sk,
+            self._page_block_port,
+            self._page_block_geom,
+            self._page_block_attdef,
         ):
             self._stack.addWidget(w)
 
@@ -393,11 +534,11 @@ class PropertyPanel(QWidget):
 
     @staticmethod
     def _ld_port_starts_with_in(port: str) -> bool:
-        return str(port or "").strip().upper().startswith("IN")
+        return is_input_port_key(port)
 
     @staticmethod
     def _ld_port_starts_with_out(port: str) -> bool:
-        return str(port or "").strip().upper().startswith("OUT")
+        return is_output_port_key(port)
 
     def _peer_display(self, d: "LogicDiagram", uid: str | None) -> tuple[str, str]:
         """(short multiline text, tooltip = full UUID or empty)."""
@@ -450,6 +591,12 @@ class PropertyPanel(QWidget):
         self._clear_port_form(self._sym_ports_form)
         self._clear_port_form(self._gate_ports_form)
         self._clear_form(self._wb_legs_form)
+        self._be_geom_lt_wrap.hide()
+        self._be_geom_lt_subject = ""
+        self._be_geom_lt_handle = ""
+        self._be_geom_lt_sketch_uid = None
+        self._be_attdef_handle = ""
+        self._be_port_edit_handle = ""
         self._stack.setCurrentIndex(self._NONE)
 
     def show_multi(self, n: int) -> None:
@@ -462,8 +609,161 @@ class PropertyPanel(QWidget):
         self._clear_port_form(self._sym_ports_form)
         self._clear_port_form(self._gate_ports_form)
         self._clear_form(self._wb_legs_form)
+        self._be_geom_lt_wrap.hide()
+        self._be_geom_lt_subject = ""
+        self._be_geom_lt_handle = ""
+        self._be_geom_lt_sketch_uid = None
+        self._be_attdef_handle = ""
+        self._be_port_edit_handle = ""
         self._multi_label.setText(f"{n} 個のアイテムが選択されています。")
         self._stack.setCurrentIndex(self._MULTI)
+
+    def show_block_edit_port(
+        self,
+        *,
+        block_name: str,
+        handle: str,
+        layer: str,
+        x_mm: float,
+        y_mm: float,
+    ) -> None:
+        self._uid = None
+        self._wire_uid = None
+        self._wire_branch_uid = None
+        self._user_sk_uid = None
+        self._user_sk_kind = ""
+        self._clear_label_forms()
+        self._clear_port_form(self._sym_ports_form)
+        self._clear_port_form(self._gate_ports_form)
+        self._clear_form(self._wb_legs_form)
+        self._be_geom_lt_wrap.hide()
+        self._be_geom_lt_subject = ""
+        self._be_geom_lt_handle = ""
+        self._be_geom_lt_sketch_uid = None
+        self._be_attdef_handle = ""
+        self._be_port_block.setText(block_name or "—")
+        self._be_port_handle.setText(handle or "—")
+        self._be_port_edit_handle = str(handle or "")
+        pk = parse_port_layer(str(layer or ""))
+        self._be_port_dir.blockSignals(True)
+        self._be_port_idx.blockSignals(True)
+        self._be_port_unit.blockSignals(True)
+        if pk is not None:
+            dix = self._be_port_dir.findText(pk.direction)
+            if dix >= 0:
+                self._be_port_dir.setCurrentIndex(dix)
+            uix = self._be_port_unit.findText(pk.unit)
+            if uix >= 0:
+                self._be_port_unit.setCurrentIndex(uix)
+            self._be_port_idx.setValue(int(pk.index))
+        else:
+            self._be_port_dir.setCurrentIndex(0)
+            self._be_port_idx.setValue(0)
+            self._be_port_unit.setCurrentIndex(0)
+        self._be_port_dir.blockSignals(False)
+        self._be_port_idx.blockSignals(False)
+        self._be_port_unit.blockSignals(False)
+        self._sync_be_port_layer_preview()
+        self._be_port_x.setText(f"{x_mm:.3f}")
+        self._be_port_y.setText(f"{y_mm:.3f}")
+        self._stack.setCurrentIndex(self._BLOCK_PORT)
+
+    def show_block_edit_geom(
+        self,
+        *,
+        block_name: str,
+        handle: str,
+        dxftype: str,
+        layer: str,
+        detail: str,
+        editable_linetype: str | None = None,
+        linetype_subject: str = "",
+        sketch_uid: str | None = None,
+    ) -> None:
+        self._uid = None
+        self._wire_uid = None
+        self._wire_branch_uid = None
+        self._user_sk_uid = None
+        self._user_sk_kind = ""
+        self._clear_label_forms()
+        self._clear_port_form(self._sym_ports_form)
+        self._clear_port_form(self._gate_ports_form)
+        self._clear_form(self._wb_legs_form)
+        self._be_attdef_handle = ""
+        self._be_port_edit_handle = ""
+        self._be_geom_block.setText(block_name or "—")
+        self._be_geom_type.setText(dxftype or "—")
+        self._be_geom_handle.setText(handle or "—")
+        self._be_geom_layer.setText(layer or "—")
+        self._be_geom_detail.setText(detail or "—")
+        self._be_geom_lt_subject = ""
+        self._be_geom_lt_handle = ""
+        self._be_geom_lt_sketch_uid = None
+        self._be_geom_lt_wrap.hide()
+        if editable_linetype is not None and linetype_subject in ("native_line", "user_sketch"):
+            self._be_geom_lt_subject = linetype_subject
+            self._be_geom_lt_handle = handle
+            self._be_geom_lt_sketch_uid = sketch_uid
+            idx = self._be_geom_lt.findText(editable_linetype)
+            if idx >= 0:
+                self._be_geom_lt.setCurrentIndex(idx)
+            else:
+                self._be_geom_lt.setCurrentIndex(0)
+                self._be_geom_lt.setCurrentText(editable_linetype)
+            self._be_geom_lt_wrap.show()
+        self._stack.setCurrentIndex(self._BLOCK_GEOM)
+
+    def show_block_edit_attdef(
+        self,
+        *,
+        block_name: str,
+        handle: str,
+        tag: str,
+        default_text: str,
+        halign: int = 0,
+        height_mm: float = 2.5,
+    ) -> None:
+        self._uid = None
+        self._wire_uid = None
+        self._wire_branch_uid = None
+        self._user_sk_uid = None
+        self._user_sk_kind = ""
+        self._clear_label_forms()
+        self._clear_port_form(self._sym_ports_form)
+        self._clear_port_form(self._gate_ports_form)
+        self._clear_form(self._wb_legs_form)
+        self._be_geom_lt_wrap.hide()
+        self._be_geom_lt_subject = ""
+        self._be_geom_lt_handle = ""
+        self._be_geom_lt_sketch_uid = None
+        self._be_port_edit_handle = ""
+        self._be_attdef_handle = str(handle or "")
+        self._be_att_block.setText(block_name or "—")
+        self._be_att_handle.setText(handle or "—")
+        tag_choices = symbol_editor_attdef_tag_choices()
+        self._be_att_tag.blockSignals(True)
+        self._be_att_tag.clear()
+        for t in tag_choices:
+            self._be_att_tag.addItem(t)
+        self._be_att_tag.blockSignals(False)
+        cur = str(tag or "").strip()
+        ix = self._be_att_tag.findText(cur)
+        if ix >= 0:
+            self._be_att_tag.setCurrentIndex(ix)
+        else:
+            self._be_att_tag.setCurrentIndex(0)
+        self._be_att_default.setText(default_text)
+        try:
+            hh = float(height_mm)
+        except (TypeError, ValueError):
+            hh = 2.5
+        self._be_att_h.setValue(max(0.25, hh))
+        ha = int(halign)
+        if ha not in (0, 1, 2):
+            ha = 0
+        hi = self._be_att_halign.findData(ha)
+        self._be_att_halign.setCurrentIndex(hi if hi >= 0 else 0)
+        self._stack.setCurrentIndex(self._BLOCK_ATTDEF)
 
     def show_symbol(
         self,
@@ -540,21 +840,33 @@ class PropertyPanel(QWidget):
         self._page_meta_block.setText(block_name)
         self._page_meta_type.setText(entity_type)
         d = self._get_diagram()
-        self._page_target.blockSignals(True)
-        self._page_target.clear()
-        pages = [p for p in d.list_pages() if p != d.current_layout_name]
-        if target_layout and target_layout not in pages:
-            pages.insert(0, target_layout)
-        for p in pages:
-            row = page_link_picker_label(d.doc, d.current_layout_name, p, exclude_uid=uid)
-            self._page_target.addItem(row, p)
-        idx = self._page_target.findData(target_layout)
-        if idx >= 0:
-            self._page_target.setCurrentIndex(idx)
-        elif self._page_target.count():
-            self._page_target.setCurrentIndex(0)
-        self._page_target.blockSignals(False)
-        self._sym_page.setText(sym or "")
+        self._page_ref_target_layout = (target_layout or "").strip()
+        self._refresh_page_ref_target_label()
+        self._page_ref_rank_combo.blockSignals(True)
+        self._page_ref_rank_combo.clear()
+        if self._page_ref_target_layout and self._uid:
+            allowed = page_ref_allowed_sym_ordinals_for_property_edit(
+                d.doc, d.current_layout_name, self._uid, self._page_ref_target_layout
+            )
+            for rk in allowed:
+                self._page_ref_rank_combo.addItem(page_index_to_letters(int(rk)), int(rk))
+            stored = page_ref_stored_rank(d.doc, d.current_layout_name, self._uid)
+            want = stored if stored is not None else page_ref_ordinal_for_uid(
+                d.doc, d.current_layout_name, self._uid
+            )
+            if want is not None:
+                idx = self._page_ref_rank_combo.findData(int(want))
+                if idx >= 0:
+                    self._page_ref_rank_combo.setCurrentIndex(idx)
+                elif self._page_ref_rank_combo.count():
+                    self._page_ref_rank_combo.setCurrentIndex(0)
+            elif self._page_ref_rank_combo.count():
+                self._page_ref_rank_combo.setCurrentIndex(0)
+        self._page_ref_rank_combo.blockSignals(False)
+        if self._page_ref_rank_combo.count():
+            self._sync_page_ref_sym_preview_from_rank_combo()
+        else:
+            self._sym_page.setText(sym or "")
         self._page_show_page_name.setChecked(bool(show_page_name))
         self._page_show_page_desc.setChecked(bool(show_page_desc))
         self._stack.setCurrentIndex(self._PAGE)
@@ -623,7 +935,7 @@ class PropertyPanel(QWidget):
         self._stack.setCurrentIndex(self._WIRE)
 
     def _show_hub_incident_wires(self, hub_uid: str, *, caption_in: str, caption_out: str) -> None:
-        """親＝ハブ上の IN* ポート、子＝ハブ上の OUT*。src/dst のクリック順に依存しない（両端点を見る）。"""
+        """List wires touching hub ports; src/dst click order is ignored."""
         self._wb_port_in_label.setText(caption_in)
         self._wb_port_out_label.setText(caption_out)
         d = self._get_diagram()
@@ -642,6 +954,8 @@ class PropertyPanel(QWidget):
                 if self._ld_port_starts_with_in(port):
                     parent_by_wire[wus] = meta
                 elif self._ld_port_starts_with_out(port):
+                    child_by_wire[wus] = meta
+                elif is_inout_port_key(port):
                     child_by_wire[wus] = meta
         parent_rows = sorted(parent_by_wire.items(), key=lambda item: item[0])
         child_rows = sorted(child_by_wire.items(), key=lambda item: item[0])
@@ -678,6 +992,8 @@ class PropertyPanel(QWidget):
                     body = f"{body}\n相手ポート: {peer_port}"
                 if local_port:
                     body = f"{body}\nこのハブのポート: {local_port}"
+                if is_inout_port_key(local_port):
+                    title = "接続"
                 detail = QLabel(body)
                 detail.setWordWrap(True)
                 detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
@@ -702,8 +1018,8 @@ class PropertyPanel(QWidget):
         self._wb_meta_type.setText(entity_type)
         self._show_hub_incident_wires(
             branch_uid,
-            caption_in="IN0_MULTI（1本まで）",
-            caption_out="OUT0_MULTI（複数可）",
+            caption_in="INOUT0_MULTI（複数可）",
+            caption_out="INOUT0_MULTI（複数可）",
         )
         self._stack.setCurrentIndex(self._WIRE_BRANCH)
 
@@ -783,6 +1099,11 @@ class PropertyPanel(QWidget):
             except (TypeError, ValueError):
                 h = 4.0
             self._usk_h.setValue(max(0.25, h))
+            ha = int(getattr(e.dxf, "halign", 0) or 0)
+            if ha not in (0, 1, 2):
+                ha = 0
+            hi = self._usk_halign.findData(ha)
+            self._usk_halign.setCurrentIndex(hi if hi >= 0 else 0)
         else:
             self._user_sk_kind = ""
             self._usk_row_lt.hide()
@@ -801,15 +1122,35 @@ class PropertyPanel(QWidget):
                 return j
         return -1
 
-    def _on_page_target_changed(self, index: int) -> None:
-        if index < 0:
-            return
+    @staticmethod
+    def _page_ref_target_caption(doc, layout_name: str) -> str:
+        name = (layout_name or "").strip()
+        if not name:
+            return "—"
+        meta = read_page_meta(doc, name)
+        desc = (meta.get("page_desc") or "").strip()
+        return f"{name}:{desc}" if desc else name
+
+    def _refresh_page_ref_target_label(self) -> None:
         d = self._get_diagram()
-        pid = self._page_target.itemData(index)
-        if not pid:
+        if not (self._page_ref_target_layout or "").strip():
+            self._page_target_label.setText("—")
             return
-        k = count_page_refs_to_target(d.doc, d.current_layout_name, str(pid), exclude_uid=self._uid)
-        self._sym_page.setText(page_ref_link_label(str(pid), k))
+        self._page_target_label.setText(
+            self._page_ref_target_caption(d.doc, self._page_ref_target_layout)
+        )
+
+    def _on_page_ref_rank_combo_changed(self, _index: int) -> None:
+        self._sync_page_ref_sym_preview_from_rank_combo()
+
+    def _sync_page_ref_sym_preview_from_rank_combo(self) -> None:
+        tgt = (self._page_ref_target_layout or "").strip()
+        if not tgt:
+            return
+        raw = self._page_ref_rank_combo.currentData()
+        if raw is None:
+            return
+        self._sym_page.setText(page_ref_link_label(tgt, int(raw)))
 
     def _clear_label_forms(self) -> None:
         self._label_edits.clear()
@@ -900,22 +1241,24 @@ class PropertyPanel(QWidget):
         if not self._uid:
             return
         d = self._get_diagram()
-        idx = self._page_target.currentIndex()
-        if idx < 0:
+        if not (self._page_ref_target_layout or "").strip():
+            QMessageBox.warning(self, "プロパティ", "リンク先ページがありません。")
             return
-        pid = self._page_target.itemData(idx)
-        if not pid:
+        rkw = self._page_ref_rank_combo.currentData()
+        if rkw is None:
+            QMessageBox.warning(self, "プロパティ", "付番を選択してください。")
             return
         try:
             with d.begin("props"):
-                d.set_page_ref(self._uid, str(pid))
+                d.set_page_ref_rank(self._uid, int(rkw))
                 d.set_page_ref_target_info_visibility(
                     self._uid,
                     show_page_name=self._page_show_page_name.isChecked(),
                     show_page_desc=self._page_show_page_desc.isChecked(),
                 )
-        except Exception:
-            pass
+        except Exception as ex:
+            QMessageBox.warning(self, "プロパティ", str(ex) or "適用に失敗しました。")
+            return
         self._on_applied()
 
     def _apply_inpage_ref(self) -> None:
@@ -937,7 +1280,14 @@ class PropertyPanel(QWidget):
         try:
             with d.begin("props"):
                 if self._user_sk_kind == "text":
-                    ok = d.set_user_sketch_text(self._user_sk_uid, self._usk_txt.text(), self._usk_h.value())
+                    ha_raw = self._usk_halign.currentData()
+                    ha = int(ha_raw) if ha_raw is not None else 0
+                    ok = d.set_user_sketch_text(
+                        self._user_sk_uid,
+                        self._usk_txt.text(),
+                        self._usk_h.value(),
+                        halign=ha,
+                    )
                     if not ok:
                         raise ValueError("テキストの更新に失敗しました。")
                 elif self._user_sk_kind in ("line", "circle", "cloud"):
@@ -954,6 +1304,100 @@ class PropertyPanel(QWidget):
             QMessageBox.warning(self, "プロパティ", str(ex) or "適用に失敗しました。")
             return
         self._on_applied()
+
+    def _sync_be_port_layer_preview(self) -> None:
+        try:
+            lyr = make_port_layer_name(
+                self._be_port_dir.currentText(),
+                int(self._be_port_idx.value()),
+                self._be_port_unit.currentText(),
+            )
+        except ValueError:
+            lyr = "—"
+        self._be_port_layer_preview.setText(lyr)
+
+    def _apply_block_edit_port(self) -> None:
+        if self._get_block_edit_session is None or self._on_block_scratch_applied is None:
+            return
+        sess = self._get_block_edit_session()
+        if sess is None:
+            return
+        blk = sess.scratch_block()
+        if blk is None or not self._be_port_edit_handle:
+            return
+        try:
+            lyr = make_port_layer_name(
+                self._be_port_dir.currentText(),
+                int(self._be_port_idx.value()),
+                self._be_port_unit.currentText(),
+            )
+        except ValueError as ex:
+            QMessageBox.warning(self, "プロパティ", str(ex) or "無効なポート属性です。")
+            return
+        try:
+            with sess.begin("block_edit_prop_port_layer"):
+                update_scratch_port_layer(blk, self._be_port_edit_handle, lyr)
+        except Exception as ex:
+            QMessageBox.warning(self, "プロパティ", str(ex) or "適用に失敗しました。")
+            return
+        self._on_block_scratch_applied()
+
+    def _apply_block_edit_linetype(self) -> None:
+        if self._get_block_edit_session is None or self._on_block_scratch_applied is None:
+            return
+        sess = self._get_block_edit_session()
+        if sess is None:
+            return
+        blk = sess.scratch_block()
+        if blk is None:
+            return
+        doc = sess.scratch_doc
+        lt = self._be_geom_lt.currentText()
+        subj = self._be_geom_lt_subject
+        try:
+            if subj == "native_line":
+                with sess.begin("block_edit_prop_linetype"):
+                    ok = set_native_line_linetype_in_block(blk, self._be_geom_lt_handle, lt)
+                if not ok:
+                    raise ValueError("線種の更新に失敗しました。")
+            elif subj == "user_sketch" and self._be_geom_lt_sketch_uid:
+                with sess.begin("block_edit_prop_linetype"):
+                    ok = set_scratch_user_sketch_linetype(doc, self._be_geom_lt_sketch_uid, lt)
+                if not ok:
+                    raise ValueError("線種の更新に失敗しました。")
+            else:
+                return
+        except Exception as ex:
+            QMessageBox.warning(self, "プロパティ", str(ex) or "適用に失敗しました。")
+            return
+        self._on_block_scratch_applied()
+
+    def _apply_block_edit_attdef(self) -> None:
+        if self._get_block_edit_session is None or self._on_block_scratch_applied is None:
+            return
+        sess = self._get_block_edit_session()
+        if sess is None:
+            return
+        blk = sess.scratch_block()
+        if blk is None or not self._be_attdef_handle:
+            return
+        tag = self._be_att_tag.currentText().strip()
+        try:
+            with sess.begin("block_edit_prop_attdef"):
+                ha_raw = self._be_att_halign.currentData()
+                ha = int(ha_raw) if ha_raw is not None else 0
+                update_scratch_attdef_fields(
+                    blk,
+                    self._be_attdef_handle,
+                    tag=tag,
+                    default_text=self._be_att_default.text(),
+                    halign=ha,
+                    height_mm=float(self._be_att_h.value()),
+                )
+        except Exception as ex:
+            QMessageBox.warning(self, "プロパティ", str(ex) or "適用に失敗しました。")
+            return
+        self._on_block_scratch_applied()
 
     def _apply_wire(self) -> None:
         if not self._wire_uid:

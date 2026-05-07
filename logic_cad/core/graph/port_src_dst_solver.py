@@ -68,12 +68,18 @@ from logic_cad.core.model.constants import (
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_WIRE_BRANCH,
 )
+from logic_cad.core.model.port_key import (
+    is_inout_port_key,
+    is_input_port_key,
+    is_output_port_key,
+)
 
 _HUB_TYPES: frozenset[str] = frozenset({ENTITY_TYPE_WIRE_BRANCH, ENTITY_TYPE_CHECKPOINT})
 
-# Canonical hub port names for flipped hub–hub wires (WB/CP blocks use these).
+# Canonical checkpoint hub port names.
 _HUB_OUT = "OUT0_MULTI"
 _HUB_IN = "IN0_MULTI"
+_HUB_INOUT = "INOUT0_MULTI"
 
 
 def normalize_wire_endpoints(
@@ -97,45 +103,62 @@ def normalize_wire_endpoints(
     if src_is_hub and dst_is_hub:
         return src_uid, src_port, dst_uid, dst_port
 
-    # ── Exactly one hub: non-hub port is the sole directional authority ───────
+    # ── Exactly one hub: non-hub IN/OUT wins, otherwise keep click order ───────
     if src_is_hub or dst_is_hub:
         if src_is_hub:
-            # src=hub, dst=gate — use gate's (dst) port
-            hub_uid, gate_uid, gate_port = src_uid, dst_uid, dst_port
+            hub_uid, hub_port = src_uid, src_port
+            gate_uid, gate_port = dst_uid, dst_port
+            gate_is_src = False
         else:
-            # src=gate, dst=hub — use gate's (src) port
-            hub_uid, gate_uid, gate_port = dst_uid, src_uid, src_port
+            hub_uid, hub_port = dst_uid, dst_port
+            gate_uid, gate_port = src_uid, src_port
+            gate_is_src = True
 
-        nhp = str(gate_port or "").upper()
-        if nhp.startswith("OUT"):
-            # Gate drives hub: canonical (gate, OUT, hub, IN0_MULTI)
-            return gate_uid, gate_port, hub_uid, _HUB_IN
-        if nhp.startswith("IN"):
-            # Hub drives gate: canonical (hub, OUT0_MULTI, gate, IN)
-            return hub_uid, _HUB_OUT, gate_uid, gate_port
+        if is_output_port_key(gate_port):
+            return gate_uid, gate_port, hub_uid, hub_port
+        if is_input_port_key(gate_port):
+            return hub_uid, hub_port, gate_uid, gate_port
+        if is_inout_port_key(gate_port):
+            if gate_is_src:
+                return gate_uid, gate_port, hub_uid, hub_port
+            return hub_uid, hub_port, gate_uid, gate_port
         # Unrecognised port format — return as-is; downstream validators will catch it
         return src_uid, src_port, dst_uid, dst_port
 
     # ── No hubs: port names are authoritative ────────────────────────────────
-    sp = str(src_port or "").upper()
-    dp = str(dst_port or "").upper()
+    src_is_in = is_input_port_key(src_port)
+    src_is_out = is_output_port_key(src_port)
+    src_is_inout = is_inout_port_key(src_port)
+    dst_is_in = is_input_port_key(dst_port)
+    dst_is_out = is_output_port_key(dst_port)
+    dst_is_inout = is_inout_port_key(dst_port)
 
-    if sp.startswith("IN") and dp.startswith("OUT"):
+    if src_is_in and dst_is_out:
         # Swap to canonical OUT → IN
         return dst_uid, dst_port, src_uid, src_port
-    if sp.startswith("OUT") and dp.startswith("IN"):
+    if src_is_out and dst_is_in:
         # Already canonical
         return src_uid, src_port, dst_uid, dst_port
-    if sp.startswith("IN") and dp.startswith("IN"):
+    if src_is_in and dst_is_in:
         raise ValueError(
             "配線の向きが不正です: 両端がINポートです。"
             "OUTポート（または配線分岐・チェックポイント）を始点にしてください。"
         )
-    if sp.startswith("OUT") and dp.startswith("OUT"):
+    if src_is_out and dst_is_out:
         raise ValueError(
             "配線の向きが不正です: 両端がOUTポートです。"
             "INポート（または配線分岐・チェックポイント）を終点にしてください。"
         )
+    if src_is_out and dst_is_inout:
+        return src_uid, src_port, dst_uid, dst_port
+    if src_is_inout and dst_is_in:
+        return src_uid, src_port, dst_uid, dst_port
+    if src_is_in and dst_is_inout:
+        return dst_uid, dst_port, src_uid, src_port
+    if src_is_inout and dst_is_out:
+        return dst_uid, dst_port, src_uid, src_port
+    if src_is_inout and dst_is_inout:
+        return src_uid, src_port, dst_uid, dst_port
     # Unrecognised combination (e.g. empty port names) — return as-is
     return src_uid, src_port, dst_uid, dst_port
 
@@ -170,20 +193,13 @@ def assert_checkpoint_wire_capacity(
     *,
     deps: WireGraphDeps,
 ) -> None:
-    """CHECKPOINT: one IN, one direct OUT. WIRE_BRANCH: one IN, unlimited OUT0_MULTI."""
+    """CHECKPOINT keeps IN/OUT caps; WIRE_BRANCH uses one INOUT port with no cap."""
     iter_wire_meta = deps.iter_wire_meta
     symbol_entity_type_fn = deps.symbol_entity_type_fn
     t_dst = symbol_entity_type_fn(dst_uid)
     if t_dst == ENTITY_TYPE_WIRE_BRANCH:
-        if dst_port != "IN0_MULTI":
-            raise ValueError("配線分岐へ接続するには入力 IN0_MULTI を使ってください")
-        n_in = sum(
-            1
-            for d in _iter_wire_meta_dicts(layout_name, iter_wire_meta)
-            if d.get("dst") == dst_uid and str(d.get("dst_port") or "") == "IN0_MULTI"
-        )
-        if n_in >= 1:
-            raise ValueError("配線分岐の入力は1本までです")
+        if dst_port != _HUB_INOUT:
+            raise ValueError("配線分岐へ接続するには INOUT0_MULTI を使ってください")
     if t_dst == ENTITY_TYPE_CHECKPOINT:
         if dst_port != "IN0_MULTI":
             raise ValueError("チェックポイントへ接続するには入力 IN0_MULTI を使ってください")
@@ -196,8 +212,8 @@ def assert_checkpoint_wire_capacity(
             raise ValueError("チェックポイントの入力は1本までです")
     t_src = symbol_entity_type_fn(src_uid)
     if t_src == ENTITY_TYPE_WIRE_BRANCH:
-        if src_port != "OUT0_MULTI":
-            raise ValueError("配線分岐から配線を出すには出力 OUT0_MULTI を使ってください")
+        if src_port != _HUB_INOUT:
+            raise ValueError("配線分岐から配線を出すには INOUT0_MULTI を使ってください")
         return
     if t_src == ENTITY_TYPE_CHECKPOINT:
         if src_port != "OUT0_MULTI":
@@ -237,6 +253,23 @@ def _direct_wire_uses_src_port(
     return False
 
 
+def _wire_uses_port_any_role(
+    layout_name: str,
+    symbol_uid: str,
+    port_key: str,
+    *,
+    deps: WireGraphDeps,
+) -> bool:
+    """Return True when *port_key* is already used as src or dst on *symbol_uid*."""
+
+    for d in _iter_wire_meta_dicts(layout_name, deps.iter_wire_meta):
+        if d.get("src") == symbol_uid and str(d.get("src_port") or "") == port_key:
+            return True
+        if d.get("dst") == symbol_uid and str(d.get("dst_port") or "") == port_key:
+            return True
+    return False
+
+
 def assert_ld_port_direct_wiring_rules(
     layout_name: str,
     src_uid: str,
@@ -247,11 +280,29 @@ def assert_ld_port_direct_wiring_rules(
     deps: WireGraphDeps,
 ) -> None:
     """At most one wire per dst port; one direct wire per src port except WIRE_BRANCH OUT0_MULTI (fan-out)."""
-    if _wire_uses_dst_port(layout_name, dst_uid, dst_port, deps=deps):
+    dst_is_branch_inout = (
+        deps.symbol_entity_type_fn(dst_uid) == ENTITY_TYPE_WIRE_BRANCH
+        and str(dst_port or "").upper() == _HUB_INOUT
+    )
+    if dst_is_branch_inout:
+        pass
+    elif is_inout_port_key(dst_port):
+        if _wire_uses_port_any_role(layout_name, dst_uid, dst_port, deps=deps):
+            raise ValueError("このポートにはすでに配線が1本接続されています")
+    elif _wire_uses_dst_port(layout_name, dst_uid, dst_port, deps=deps):
         raise ValueError("このポートにはすでに配線が1本接続されています")
+
+    src_is_branch_inout = (
+        deps.symbol_entity_type_fn(src_uid) == ENTITY_TYPE_WIRE_BRANCH
+        and str(src_port or "").upper() == _HUB_INOUT
+    )
     if (
-        deps.symbol_entity_type_fn(src_uid) != ENTITY_TYPE_WIRE_BRANCH
-        and _direct_wire_uses_src_port(layout_name, src_uid, src_port, deps=deps)
+        not src_is_branch_inout
+        and (
+            _wire_uses_port_any_role(layout_name, src_uid, src_port, deps=deps)
+            if is_inout_port_key(src_port)
+            else _direct_wire_uses_src_port(layout_name, src_uid, src_port, deps=deps)
+        )
     ):
         raise ValueError("このポートからの直接配線はすでに1本あります（分岐ポイントから分岐してください）")
 
@@ -302,7 +353,7 @@ def _explicit_in_out_flips(
         dt = symbol_entity_type_fn(dst)
         if not (is_hub_type(st) or is_hub_type(dt)):
             continue
-        if sp.startswith("IN") and dp.startswith("OUT"):
+        if is_input_port_key(sp_raw) and is_output_port_key(dp_raw):
             by_uid[wu] = WireFlip(
                 wire_uid=wu,
                 new_src=dst,
@@ -343,17 +394,27 @@ def _anchor_bfs_depths(
     for _wu, meta in wires:
         src = str(meta.get("src") or "")
         dst = str(meta.get("dst") or "")
-        sp_u = str(meta.get("src_port") or "").upper()
-        dp_u = str(meta.get("dst_port") or "").upper()
+        sp_raw = str(meta.get("src_port") or "")
+        dp_raw = str(meta.get("dst_port") or "")
         st = symbol_entity_type_fn(src)
         dt = symbol_entity_type_fn(dst)
         # Non-hub OUT → hub IN
-        if not is_hub_type(st) and is_hub_type(dt) and sp_u.startswith("OUT") and dp_u.startswith("IN"):
+        if (
+            not is_hub_type(st)
+            and is_hub_type(dt)
+            and is_output_port_key(sp_raw)
+            and is_input_port_key(dp_raw)
+        ):
             if dst not in hub_depth:
                 hub_depth[dst] = 0
                 queue.append(dst)
         # Hub OUT → non-hub IN
-        if is_hub_type(st) and not is_hub_type(dt) and sp_u.startswith("OUT") and dp_u.startswith("IN"):
+        if (
+            is_hub_type(st)
+            and not is_hub_type(dt)
+            and is_output_port_key(sp_raw)
+            and is_input_port_key(dp_raw)
+        ):
             if src not in hub_depth:
                 hub_depth[src] = 0
                 queue.append(src)
@@ -437,67 +498,6 @@ def find_flip_to_free_branch_in_for_pending_connection(
     *,
     deps: WireGraphDeps,
 ) -> list[WireFlip] | None:
-    """Traverse the hub-only chain upstream of *dst* and collect flips to free its IN0_MULTI.
-
-    **Multi-level chain reversal:**
-
-    Starting from *dst* (must be WB/CP with ``dst_port == IN0_MULTI``), the function
-    walks the chain of hub→hub wires upstream, collecting a :class:`WireFlip` for each
-    segment. It stops when:
-
-    - The current hub's ``IN0_MULTI`` is **empty** → return the accumulated flip list
-      (possibly empty if *dst* IN was already free).
-    - The upstream symbol is **not a hub** (e.g. AND/OR gate) → return ``None``
-      (a non-hub driver blocks the chain; caller lets capacity assertion fail).
-    - More than one wire feeds the current hub's ``IN0_MULTI`` → return ``None``.
-
-    Returns a (possibly empty) ``list[WireFlip]`` on success, or ``None`` when the
-    chain cannot be safely reversed.
-
-    Example — WB1→WB2→WB3 + AND2→WB3:
-      Traversal: WB3 ← WB2 ← WB1 (IN empty) → flips=[WB3→WB2 rev, WB2→WB1 rev]
-    """
-    symbol_entity_type_fn = deps.symbol_entity_type_fn
-    iter_wire_meta = deps.iter_wire_meta
-    t_dst = symbol_entity_type_fn(dst_uid)
-    if t_dst not in (ENTITY_TYPE_WIRE_BRANCH, ENTITY_TYPE_CHECKPOINT):
-        return None
-    if str(dst_port or "") != _HUB_IN:
-        return None
-
-    flips: list[WireFlip] = []
-    current = dst_uid
-
-    while True:
-        incumbents: list[tuple[str, dict]] = [
-            (wu, meta)
-            for _e, wu, meta in iter_wire_meta(layout_name)
-            if wu
-            and meta.get("dst") == current
-            and str(meta.get("dst_port") or "") == _HUB_IN
-        ]
-
-        if not incumbents:
-            # current hub's IN is free — chain reversal complete
-            return flips
-        if len(incumbents) > 1:
-            return None
-
-        wire_uid, meta = incumbents[0]
-        upstream_uid = str(meta.get("src") or "")
-        sp = str(meta.get("src_port") or "").upper()
-
-        if not upstream_uid or not sp.startswith("OUT"):
-            return None
-        if not is_hub_type(symbol_entity_type_fn(upstream_uid)):
-            # Non-hub (AND/OR etc.) at chain root — cannot flip past it
-            return None
-
-        flips.append(WireFlip(
-            wire_uid=wire_uid,
-            new_src=current,
-            new_src_port=_HUB_OUT,
-            new_dst=upstream_uid,
-            new_dst_port=_HUB_IN,
-        ))
-        current = upstream_uid
+    """Hub-chain reversal is no longer used (kept for API compatibility)."""
+    _ = layout_name, dst_uid, dst_port, deps
+    return None

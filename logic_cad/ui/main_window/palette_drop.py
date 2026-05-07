@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QInputDialog, QMessageBox
+from PySide6.QtWidgets import QMessageBox
 
 from logic_cad.core.debug.debug_log import logic_cad_log
-from logic_cad.core.pages.page_ref import page_link_picker_label
+from logic_cad.ui.dialogs.page_link_place_dialog import run_page_link_place_dialog
 from logic_cad.ui.panels.palette_panel import MIME_PALETTE
 from logic_cad.ui.snap_utils import snap_dxf_pos
 
@@ -39,8 +39,8 @@ def view_drop(win: MainWindow, event) -> None:
     kind, _, name = raw.partition(":")
     logic_cad_log("drop", f"mime={raw!r} kind={kind!r} name={name!r} dxf_pos=({x}, {y})")
     if kind == "page_link":
-        pages = [p for p in win._diagram.list_pages() if p != win._diagram.current_layout_name]
-        if not pages:
+        others = [p for p in win._diagram.list_pages() if p != win._diagram.current_layout_name]
+        if not others:
             QMessageBox.information(
                 win,
                 "ページ跨ぎ",
@@ -48,20 +48,14 @@ def view_drop(win: MainWindow, event) -> None:
             )
             event.ignore()
             return
-        labels = [
-            page_link_picker_label(win._diagram.doc, win._diagram.current_layout_name, p)
-            for p in pages
-        ]
-        choice, ok = QInputDialog.getItem(win, "ページ跨ぎ", "リンク先ページ:", labels, 0, False)
-        if not ok:
+        picked = run_page_link_place_dialog(win)
+        if picked is None:
             event.ignore()
             return
-        target = pages[labels.index(choice)]
+        target, sym_ord = picked
         try:
             with win._diagram.begin("page_link"):
-                win._diagram.place_page_link((x, y), target)
-                cur = win._diagram.current_layout_name
-                win._diagram.place_page_link_at(target, (x + 28.0, y + 22.0), cur)
+                win._diagram.place_page_link_pair_ranked((x, y), target, sym_ord)
         except Exception as ex:
             QMessageBox.warning(win, "ページ跨ぎ", str(ex))
             event.ignore()

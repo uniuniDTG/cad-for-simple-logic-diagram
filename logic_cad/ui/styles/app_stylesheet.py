@@ -183,10 +183,100 @@ QWidget#paletteColumn QPushButton#sketchToolText:checked:hover {
     border-color: #30c8f0;
 }
 
+QWidget#blockEditPanel QPushButton#blockSketchToolLine,
+QWidget#blockEditPanel QPushButton#blockSketchToolCircle,
+QWidget#blockEditPanel QPushButton#blockSketchToolText,
+QWidget#blockEditPanel QPushButton#blockSketchToolAttdef,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPort,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolLine,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolText,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef {
+    background-color: #2e3138;
+    border: 1px solid #383c44;
+    border-radius: 0px;
+    padding: 4px;
+    min-width: 38px;
+    max-width: 38px;
+    min-height: 34px;
+    max-height: 34px;
+}
+QWidget#blockEditPanel QPushButton#blockSketchToolLine:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolCircle:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolText:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolText:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:hover {
+    background-color: #343840;
+    border-color: #4a7a98;
+}
+QWidget#blockEditPanel QPushButton#blockSketchToolLine:checked,
+QWidget#blockEditPanel QPushButton#blockSketchToolCircle:checked,
+QWidget#blockEditPanel QPushButton#blockSketchToolText:checked,
+QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolText:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked {
+    background-color: #003a52;
+    border: 2px solid #00b4e0;
+}
+QWidget#blockEditPanel QPushButton#blockSketchToolLine:checked:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolCircle:checked:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolText:checked:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolText:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked:hover {
+    background-color: #00485e;
+    border-color: #30c8f0;
+}
+QFrame#blockEditToolsBar QPushButton#blockApplyToMain {
+    background-color: #1a5c42;
+    color: #e8f8ee;
+    border: 1px solid #2a8c60;
+    padding: 6px 14px;
+    min-width: 120px;
+    max-width: none;
+    min-height: 28px;
+    max-height: none;
+    font-weight: bold;
+}
+QFrame#blockEditToolsBar QPushButton#blockApplyToMain:hover {
+    background-color: #228050;
+    border-color: #40b878;
+}
+QFrame#blockEditToolsBar QPushButton#blockApplyToMain:pressed {
+    background-color: #0d4028;
+}
+
+QWidget#blockEditPanel QPushButton#blockSketchToolCircle:disabled,
+QWidget#blockEditPanel QPushButton#blockSketchToolText:disabled,
+QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:disabled,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:disabled,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolText:disabled,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:disabled {
+    background-color: #26282e;
+    border-color: #2e3238;
+}
+
 QGraphicsView {
     border: 1px solid #1a1c20;
     border-top: 2px solid #1a1c20;
     background-color: #23252a;
+}
+
+/* Block symbol editor: opaque style sheet background would hide scene drawBackground (grid). */
+QGraphicsView#blockEditCanvasView {
+    border: 1px solid #1a1c20;
+    border-top: 2px solid #1a1c20;
+    background-color: transparent;
 }
 
 QGroupBox {

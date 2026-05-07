@@ -41,3 +41,14 @@ def test_validate_accepts_com_port_layers() -> None:
     issues = validate(doc)
 
     assert not any("COM_PORT_BLOCK" in issue and "不正" in issue for issue in issues)
+
+
+def test_validate_accepts_inout_port_layers() -> None:
+    doc = new_document()
+    blk = doc.blocks.new("INOUT_PORT_BLOCK")
+    blk.add_point((0.0, 0.0), dxfattribs={"layer": "LD_PORT_INOUT0_LOGIC"})
+    blk.add_point((1.0, 0.0), dxfattribs={"layer": "LD_PORT_OUT0_LOGIC"})
+
+    issues = validate(doc)
+
+    assert not any("INOUT_PORT_BLOCK" in issue and "不正" in issue for issue in issues)

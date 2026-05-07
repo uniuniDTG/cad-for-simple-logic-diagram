@@ -108,9 +108,11 @@ class WireServiceCoreMixin:
         from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT
         from logic_cad.core.routing.occupancy import banned_out_cardinals_for_hub
 
-        if src_port != "OUT0_MULTI":
-            return None
         t = self._symbol_entity_type(src_uid)
+        if t == ENTITY_TYPE_CHECKPOINT and src_port != "OUT0_MULTI":
+            return None
+        if t == ENTITY_TYPE_WIRE_BRANCH and src_port != "INOUT0_MULTI":
+            return None
         if t not in (ENTITY_TYPE_CHECKPOINT, ENTITY_TYPE_WIRE_BRANCH):
             return None
         banned = banned_out_cardinals_for_hub(

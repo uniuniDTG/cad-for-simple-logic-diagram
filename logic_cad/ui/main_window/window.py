@@ -7,7 +7,18 @@ from PySide6.QtCore import QPoint, QTimer, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut, QShowEvent
 from pathlib import Path
 
-from PySide6.QtWidgets import QFileDialog, QLabel, QMainWindow, QMenu, QMessageBox, QStatusBar
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QStackedWidget,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 from logic_cad.core.logic_diagram import LogicDiagram
 from . import (
@@ -27,6 +38,14 @@ from logic_cad.ui.panels.page_panel import PagePanel
 from logic_cad.ui.panels.palette_panel import PalettePanel
 from logic_cad.ui.panels.property_panel import PropertyPanel
 from logic_cad.ui.panels.wire_sketch_tool_buttons import create_wire_sketch_tool_buttons
+from logic_cad.ui.panels.block_edit_panel import BlockEditPanel
+from logic_cad.ui.symbol_block_editor import SymbolBlockEditScene, SymbolBlockEditView
+from logic_cad.ui.symbol_block_editor.scene import (
+    ITEM_KIND_ATTDEF,
+    ITEM_KIND_GEOM,
+    ITEM_KIND_PORT,
+    PORT_LAYER_TAKEN_MESSAGE,
+)
 from logic_cad.ui.scene import DiagramScene
 from logic_cad.ui.layer_lineweight_dialog import LayerLineweightDialog
 from logic_cad.ui.styles import APP_STYLESHEET
@@ -47,6 +66,11 @@ _TEMPLATE_VALIDATION_LOGGER = logging.getLogger("logic_cad.validation.template")
 
 class MainWindow(QMainWindow):
     _page_tabs: object
+    _center_stack: QStackedWidget
+    _block_canvas_stack: QStackedWidget
+    _block_panel: BlockEditPanel
+    _block_scene: SymbolBlockEditScene
+    _block_view: SymbolBlockEditView
 
     def __init__(self) -> None:
         super().__init__()
@@ -101,6 +125,44 @@ class MainWindow(QMainWindow):
         self._view.dragMoveEvent = lambda e: palette_drop.view_drag_move(self, e)  # type: ignore[method-assign]
         self._view.dropEvent = lambda e: palette_drop.view_drop(self, e)  # type: ignore[method-assign]
 
+        self._block_panel = BlockEditPanel(
+            lambda: self._diagram,
+            on_applied=self._after_block_edit_applied,
+            notify=lambda msg: show_toast(msg, parent_window=self),
+        )
+        self._block_scene = SymbolBlockEditScene(
+            lambda: self._block_panel.session(),
+            self._block_panel.request_port_layer_interactive,
+            self._block_panel.sketch_line_linetype,
+        )
+        self._block_view = SymbolBlockEditView(self._block_scene)
+        self._block_view.set_escape_callback(self._block_panel.clear_placement_tools)
+        self._block_scene.status_message.connect(self._on_block_edit_status_message)
+        self._block_panel.attach_scene(self._block_scene)
+        self._block_scene.selectionChanged.connect(self._on_block_selection_changed)
+        self._block_panel.session_changed.connect(self._on_block_edit_session_changed)
+        self._center_stack = QStackedWidget()
+        self._center_stack.addWidget(self._view)
+        self._block_empty_hint = QWidget()
+        _bel = QVBoxLayout(self._block_empty_hint)
+        _bel.addStretch()
+        _bh = QLabel("左の一覧でブロックを選択すると、ここに編集キャンバスが表示されます。")
+        _bh.setWordWrap(True)
+        _bh.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        _bel.addWidget(_bh)
+        _bel.addStretch()
+        self._block_editor_page = QWidget()
+        _bcl = QVBoxLayout(self._block_editor_page)
+        _bcl.setContentsMargins(0, 0, 0, 0)
+        _bcl.setSpacing(4)
+        _bcl.addWidget(self._block_panel.tools_widget())
+        _bcl.addWidget(self._block_view, 1)
+        self._block_canvas_stack = QStackedWidget()
+        self._block_canvas_stack.addWidget(self._block_empty_hint)
+        self._block_canvas_stack.addWidget(self._block_editor_page)
+        self._center_stack.addWidget(self._block_canvas_stack)
+        self._last_tab_index = 0
+
         self._palette = PalettePanel()
         self._refresh_palette()
         self._page_bar = PagePanel(lambda: self._diagram, self._on_page_change)
@@ -109,14 +171,18 @@ class MainWindow(QMainWindow):
         self._page_bar.duplicatePageRequested.connect(self._on_duplicate_page)
         self._page_bar.addPageRequested.connect(self._show_add_page_dialog)
         self._page_bar.regenerateTocRequested.connect(self._regenerate_toc)
+        self._page_bar.importPagesFromForeignRequested.connect(self._on_import_pages_from_foreign)
         self._props = PropertyPanel(
             lambda: self._diagram,
             self._refresh_scene,
             on_align_selected=self._scene.request_align_selected,
+            get_block_edit_session=lambda: self._block_panel.session(),
+            on_block_scratch_applied=self._on_block_scratch_property_applied,
         )
         self._scene.set_after_delete_callback(self._props.clear_selection)
         self._props.setMinimumWidth(200)
         self._symbol_clipboard = None
+        self._block_edit_entity_clipboard: bytes | None = None
         self._symbol_library_dialog = None
         self._manual_dialog = None
         self._log_dialog: LogWindowDialog | None = None
@@ -129,14 +195,20 @@ class MainWindow(QMainWindow):
         sc_find_prev.setContext(Qt.ShortcutContext.WindowShortcut)
         sc_find_prev.activated.connect(self._on_find_shift_f3_global)
 
+        self._shortcut_block_esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self._shortcut_block_esc.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._shortcut_block_esc.activated.connect(self._on_block_escape_key)
+
         self.setCentralWidget(layout.build_central_widget(self))
+        self._update_block_escape_shortcut_enabled()
 
         self._status_cursor = QLabel("—")
         self._status_cursor.setObjectName("statusCursorCoords")
         _sb = QStatusBar()
         _sb.addPermanentWidget(self._status_cursor)
         self.setStatusBar(_sb)
-        self._view.cursor_dxf_mm_changed.connect(self._on_cursor_dxf_mm)
+        self._view.cursor_dxf_mm_changed.connect(self._on_main_cursor_dxf_mm)
+        self._block_view.cursor_dxf_mm_changed.connect(self._on_block_cursor_dxf_mm)
 
         menus.build_file_edit_menus(self)
         menus.build_project_settings_menu(self)
@@ -144,6 +216,51 @@ class MainWindow(QMainWindow):
         menus.build_view_menu(self)
         self._page_bar.sync_from_diagram()
         document_actions.update_window_title(self)
+
+    def _on_block_scratch_property_applied(self) -> None:
+        self._block_scene.refresh_from_session()
+        QTimer.singleShot(0, self._on_block_selection_changed)
+
+    def _sync_block_editor_canvas(self) -> None:
+        if self._page_tabs.currentIndex() != 2:
+            return
+        if self._block_panel.session() is not None:
+            self._block_canvas_stack.setCurrentIndex(1)
+        else:
+            self._block_canvas_stack.setCurrentIndex(0)
+            self._block_panel.clear_block_list_selection()
+
+    def _on_block_edit_session_changed(self) -> None:
+        self._sync_block_editor_canvas()
+        self._update_window_title()
+        if self._page_tabs.currentIndex() == 2:
+            QTimer.singleShot(0, self._fit_block_initial_view)
+
+    def _fit_block_initial_view(self) -> None:
+        if self._page_tabs.currentIndex() != 2:
+            return
+        self._block_view.fit_initial_view()
+
+    def _on_block_edit_status_message(self, message: str) -> None:
+        """Block-edit feedback: toast for port conflict; other hints on the status bar."""
+        if message == PORT_LAYER_TAKEN_MESSAGE:
+            show_toast(message, parent_window=self)
+            return
+        sb = self.statusBar()
+        if sb is not None:
+            sb.showMessage(message, 3000)
+
+    def _on_main_cursor_dxf_mm(self, dxf: object) -> None:
+        """Forward main diagram cursor DXF coords when not on the block tab."""
+        if self._page_tabs.currentIndex() == 2:
+            return
+        self._on_cursor_dxf_mm(dxf)
+
+    def _on_block_cursor_dxf_mm(self, dxf: object) -> None:
+        """Forward block canvas cursor DXF coords only on the block tab."""
+        if self._page_tabs.currentIndex() != 2:
+            return
+        self._on_cursor_dxf_mm(dxf)
 
     def _on_cursor_dxf_mm(self, dxf: object) -> None:
         if dxf is None:
@@ -195,6 +312,10 @@ class MainWindow(QMainWindow):
         return document_actions.prompt_save_if_dirty(self)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._block_panel.session() is not None:
+            if not self._block_panel.request_end_session_for_nav():
+                event.ignore()
+                return
         if self._prompt_save_if_dirty():
             event.accept()
         else:
@@ -222,6 +343,54 @@ class MainWindow(QMainWindow):
     def _paste_symbol_clipboard(self) -> None:
         clipboard_actions.paste_symbol_clipboard(self)
 
+    def _after_block_edit_applied(self) -> None:
+        self._diagram.rebuild_index()
+        self._refresh_palette()
+        self._refresh_scene()
+
+    def _on_block_escape_key(self) -> None:
+        if self._page_tabs.currentIndex() != 2:
+            return
+        if QApplication.activeModalWidget() is not None:
+            return
+        self._block_panel.clear_placement_tools()
+
+    def _update_block_escape_shortcut_enabled(self) -> None:
+        """Enable window-level Esc only on the block-edit tab.
+
+        A ``WindowShortcut`` on Escape would otherwise consume the key on every tab,
+        preventing :class:`DiagramView` from clearing wire/sketch previews and selection.
+        """
+
+        self._shortcut_block_esc.setEnabled(self._page_tabs.currentIndex() == 2)
+
+    def _on_main_tab_changed(self, index: int) -> None:
+        prev = self._last_tab_index
+        if prev == 2 and index != 2:
+            if not self._block_panel.request_end_session_for_nav():
+                self._page_tabs.blockSignals(True)
+                self._page_tabs.setCurrentIndex(2)
+                self._page_tabs.blockSignals(False)
+                return
+        self._last_tab_index = index
+        self._on_cursor_dxf_mm(None)
+        if index == 2:
+            self._scene.clearSelection()
+            self._props.clear_selection()
+            self._center_stack.setCurrentIndex(1)
+            self._block_panel.refresh_block_list()
+            self._block_scene.refresh_from_session()
+            self._sync_block_editor_canvas()
+            self._fit_block_initial_view()
+            self._block_view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+        else:
+            self._block_scene.clearSelection()
+            self._center_stack.setCurrentIndex(0)
+            self._view.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+            QTimer.singleShot(0, self._on_selection_changed)
+        self._update_window_title()
+        self._update_block_escape_shortcut_enabled()
+
     def _on_page_tab_bar_context(self, pos) -> None:
         page_actions.on_page_tab_bar_context(self, pos)
 
@@ -234,6 +403,8 @@ class MainWindow(QMainWindow):
         self._palette.refresh_from_document(self._diagram.doc)
 
     def _apply_frame_template(self) -> None:
+        if not self._block_panel.request_end_session_for_nav():
+            return
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "図枠テンプレート DXF を選択",
@@ -299,6 +470,8 @@ class MainWindow(QMainWindow):
         show_toast("図枠テンプレートを適用しました。", parent_window=self)
 
     def _load_symbol_library_from_dxf(self) -> None:
+        if not self._block_panel.request_end_session_for_nav():
+            return
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "シンボルライブラリ DXF を選択",
@@ -360,6 +533,8 @@ class MainWindow(QMainWindow):
         self._log_dialog.activateWindow()
 
     def _reload_symbol_library(self) -> None:
+        if not self._block_panel.request_end_session_for_nav():
+            return
         ret = QMessageBox.question(
             self,
             "シンボルライブラリを再読み込み",
@@ -468,6 +643,9 @@ class MainWindow(QMainWindow):
     def _show_add_page_dialog(self) -> None:
         page_actions.show_add_page_dialog(self)
 
+    def _on_import_pages_from_foreign(self) -> None:
+        page_actions.run_import_pages_dialog(self)
+
     def _on_duplicate_page(self, source_name: str) -> None:
         page_actions.on_duplicate_page(self, source_name)
 
@@ -483,11 +661,167 @@ class MainWindow(QMainWindow):
     def _on_page_change(self, name: str) -> None:
         page_actions.on_page_change(self, name)
 
-    def _navigate_to_page_link(self, page_name: str) -> None:
-        page_actions.navigate_to_page_link(self, page_name)
+    def _navigate_to_page_link(self, page_name: str, focus_peer_uid: str | None = None) -> None:
+        page_actions.navigate_to_page_link(self, page_name, focus_peer_uid)
 
     def _navigate_to_inpage_peer(self, peer_uid: str) -> None:
         page_actions.navigate_to_inpage_peer(self, peer_uid)
+
+    def _on_block_selection_changed(self) -> None:
+        from PySide6.QtWidgets import QGraphicsEllipseItem
+
+        from logic_cad.core.model.constants import ENTITY_TYPE_USER_LINE
+        from logic_cad.core.model.user_sketch_layers import user_sketch_display_linetype_for_entity
+        from logic_cad.core.model.xdata import get_type
+        from logic_cad.core.undo.history import find_entity_by_uid
+        from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserLineItem
+
+        if self._page_tabs.currentIndex() != 2:
+            return
+        sess = self._block_panel.session()
+        if sess is None:
+            self._props.clear_selection()
+            return
+        blk = sess.scratch_block()
+        if blk is None:
+            self._props.clear_selection()
+            return
+        sel = self._block_scene.selectedItems()
+        if len(sel) != 1:
+            if not sel:
+                self._props.clear_selection()
+            else:
+                self._props.show_multi(len(sel))
+            return
+        it = sel[0]
+        bname = sess.block_name
+        if isinstance(it, UserLineItem):
+            ent = find_entity_by_uid(sess.scratch_doc, it.sketch_uid)
+            if ent is None:
+                self._props.clear_selection()
+                return
+            lt = user_sketch_display_linetype_for_entity(ent)
+            det = (
+                f"UUID: {it.sketch_uid}\n"
+                f"表示線種: {lt}\n"
+                f"{MainWindow._block_geom_property_detail(ent)}"
+            )
+            self._props.show_block_edit_geom(
+                block_name=bname,
+                handle=str(ent.dxf.handle),
+                dxftype="USER_LINE",
+                layer=str(ent.dxf.layer),
+                detail=det,
+                editable_linetype=lt,
+                linetype_subject="user_sketch",
+                sketch_uid=it.sketch_uid,
+            )
+            return
+
+        if isinstance(it, UserCircleItem):
+            ent = find_entity_by_uid(sess.scratch_doc, it.sketch_uid)
+            if ent is None:
+                self._props.clear_selection()
+                return
+            lt = user_sketch_display_linetype_for_entity(ent)
+            det = (
+                f"タイプ: USER_CIRCLE\n"
+                f"UUID: {it.sketch_uid}\n"
+                f"表示線種: {lt}\n"
+                f"{MainWindow._block_geom_property_detail(ent)}"
+            )
+            self._props.show_block_edit_geom(
+                block_name=bname,
+                handle=str(ent.dxf.handle),
+                dxftype="USER_CIRCLE",
+                layer=str(ent.dxf.layer),
+                detail=det,
+                editable_linetype=lt,
+                linetype_subject="user_sketch",
+                sketch_uid=it.sketch_uid,
+            )
+            return
+
+        h = str(it.data(0) or "")
+        kind = str(it.data(1) or "")
+        ent = None
+        for e in blk:
+            if str(getattr(e.dxf, "handle", "") or "") == h:
+                ent = e
+                break
+        if ent is None:
+            self._props.clear_selection()
+            return
+        if kind == ITEM_KIND_PORT and isinstance(it, QGraphicsEllipseItem):
+            layer = str(ent.dxf.layer)
+            self._props.show_block_edit_port(
+                block_name=bname,
+                handle=h,
+                layer=layer,
+                x_mm=float(ent.dxf.location.x),
+                y_mm=float(ent.dxf.location.y),
+            )
+            return
+        if kind == ITEM_KIND_ATTDEF and ent.dxftype() == "ATTDEF":
+            ha = int(getattr(ent.dxf, "halign", 0) or 0)
+            self._props.show_block_edit_attdef(
+                block_name=bname,
+                handle=h,
+                tag=str(ent.dxf.tag),
+                default_text=str(ent.dxf.text or ""),
+                halign=ha,
+                height_mm=float(getattr(ent.dxf, "height", 2.5) or 2.5),
+            )
+            return
+        if kind == ITEM_KIND_GEOM:
+            detail = MainWindow._block_geom_property_detail(ent)
+            lt_val: str | None = None
+            lt_subj = ""
+            sk_uid: str | None = None
+            if ent.dxftype() == "LINE" and get_type(ent) != ENTITY_TYPE_USER_LINE:
+                lt_val = MainWindow._block_native_line_display_linetype(ent)
+                lt_subj = "native_line"
+            self._props.show_block_edit_geom(
+                block_name=bname,
+                handle=h,
+                dxftype=str(ent.dxftype()),
+                layer=str(ent.dxf.layer),
+                detail=detail,
+                editable_linetype=lt_val,
+                linetype_subject=lt_subj,
+                sketch_uid=sk_uid,
+            )
+            return
+        self._props.clear_selection()
+
+    @staticmethod
+    def _block_native_line_display_linetype(ent: object) -> str:
+        from logic_cad.core.model.user_sketch_layers import normalize_user_sketch_linetype
+
+        lt_raw = str(getattr(ent.dxf, "linetype", "") or "").strip()
+        if not lt_raw or lt_raw.upper() in ("BYLAYER", "BYBLOCK"):
+            return "CONTINUOUS"
+        return normalize_user_sketch_linetype(lt_raw)
+
+    @staticmethod
+    def _block_geom_property_detail(ent: object) -> str:
+        import math
+
+        et = ent.dxftype()  # type: ignore[union-attr]
+        if et == "LINE":
+            x0, y0 = float(ent.dxf.start.x), float(ent.dxf.start.y)  # type: ignore[union-attr]
+            x1, y1 = float(ent.dxf.end.x), float(ent.dxf.end.y)
+            return f"長さ {math.hypot(x1 - x0, y1 - y0):.3f} mm"
+        if et == "CIRCLE":
+            return f"半径 {float(ent.dxf.radius):.3f} mm"  # type: ignore[union-attr]
+        if et == "LWPOLYLINE":
+            rows = list(ent.get_points("xy"))  # type: ignore[union-attr]
+            closed = bool(ent.closed)  # type: ignore[union-attr]
+            cl = "閉じた" if closed else "開いた"
+            return f"頂点数 {len(rows)}（{cl}）"
+        if et == "ARC":
+            return f"半径 {float(ent.dxf.radius):.3f} mm"  # type: ignore[union-attr]
+        return "—"
 
     def _on_selection_changed(self) -> None:
         selection_props.on_selection_changed(self)

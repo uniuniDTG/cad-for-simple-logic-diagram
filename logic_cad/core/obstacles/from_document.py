@@ -16,6 +16,7 @@ from logic_cad.core.model.constants import (
     ROUTING_WIRE_HALF_WIDTH,
 )
 from logic_cad.core.model.index_store import IndexStore
+from logic_cad.core.model.port_key import is_input_port_key, is_output_port_key
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
 from logic_cad.core.services.dynamic_gate_factory import GateViewGeometry, gate_view_geometry_from_block_name
@@ -118,9 +119,9 @@ def _preferred_port_cutout_side(index: IndexStore, uid: str, port_key: str) -> s
     geo = gate_view_geometry_from_block_name(str(ins.dxf.name))
     if geo is None:
         return None
-    if port_key.startswith("IN"):
+    if is_input_port_key(port_key):
         return "left"
-    if port_key.startswith("OUT"):
+    if is_output_port_key(port_key):
         return "right"
     return None
 

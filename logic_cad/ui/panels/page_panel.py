@@ -21,6 +21,7 @@ class PagePanel(QListWidget):
     duplicatePageRequested = Signal(str)
     addPageRequested = Signal()
     regenerateTocRequested = Signal()
+    importPagesFromForeignRequested = Signal()
 
     def __init__(self, get_diagram: Callable[[], LogicDiagram], on_change: Callable[[str], None], parent=None) -> None:
         super().__init__(parent)
@@ -78,5 +79,6 @@ class PagePanel(QListWidget):
                 menu.addAction("ページを複製…", lambda: self.duplicatePageRequested.emit(name))
                 menu.addSeparator()
         menu.addAction("ページを追加…", lambda: self.addPageRequested.emit())
+        menu.addAction("別ファイルからページを取り込み…", lambda: self.importPagesFromForeignRequested.emit())
         menu.addAction("目次を再生成", lambda: self.regenerateTocRequested.emit())
         menu.exec(self.mapToGlobal(pos))

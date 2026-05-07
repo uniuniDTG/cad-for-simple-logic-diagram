@@ -41,6 +41,30 @@ def sketch_line_icon(*, size: int = 26) -> QIcon:
     return QIcon(pm)
 
 
+def block_port_icon(*, size: int = 26) -> QIcon:
+    """Connection / port point (green diamond + center dot) for block port placement."""
+    pm = _pixmap(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    cx, cy = size / 2.0, size / 2.0
+    rh = max(5, size // 3)
+    diamond = QPolygonF([
+        QPointF(cx, cy - rh),
+        QPointF(cx + rh, cy),
+        QPointF(cx, cy + rh),
+        QPointF(cx - rh, cy),
+    ])
+    p.setBrush(QColor(90, 180, 110, 60))
+    p.setPen(_pen(120, 220, 140, 1.6))
+    p.drawPolygon(diamond)
+    p.setBrush(QColor(140, 240, 150))
+    p.setPen(Qt.PenStyle.NoPen)
+    pr = max(2.0, size / 10.0)
+    p.drawEllipse(QPointF(cx, cy), pr, pr)
+    p.end()
+    return QIcon(pm)
+
+
 def sketch_circle_icon(*, size: int = 26) -> QIcon:
     """Circle with center crosshair — CAD circle tool."""
     pm = _pixmap(size)
@@ -74,6 +98,33 @@ def sketch_text_icon(*, size: int = 26) -> QIcon:
     base_pen = _pen(100, 180, 220, 1.0)
     p.setPen(base_pen)
     p.drawLine(QPointF(cx - hw - 1, bot + 2), QPointF(cx + hw + 1, bot + 2))
+    p.end()
+    return QIcon(pm)
+
+
+def sketch_attdef_icon(*, size: int = 26) -> QIcon:
+    """Attribute definition: rectangular frame with ``T`` + baseline inside (ATTDEF / text field)."""
+
+    pm = _pixmap(size)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(_pen())
+    m = max(3, size // 7)
+    p.drawRect(int(m), int(m), int(size - 2 * m), int(size - 2 * m))
+    inset = max(2.0, float(size) / 12.0)
+    left = float(m) + inset
+    right = float(size - m) - inset
+    top = float(m) + inset
+    bottom = float(size - m) - inset
+    cx = 0.5 * (left + right)
+    span = right - left
+    hw = max(2.5, span * 0.36)
+    t_top = top + (bottom - top) * 0.14
+    t_bot = bottom - (bottom - top) * 0.28
+    p.drawLine(QPointF(cx - hw, t_top), QPointF(cx + hw, t_top))
+    p.drawLine(QPointF(cx, t_top), QPointF(cx, t_bot))
+    p.setPen(_pen(100, 180, 220, 1.0))
+    p.drawLine(QPointF(left + 0.5, bottom - 1.0), QPointF(right - 0.5, bottom - 1.0))
     p.end()
     return QIcon(pm)
 

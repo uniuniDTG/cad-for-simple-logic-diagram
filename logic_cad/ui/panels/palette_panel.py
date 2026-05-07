@@ -29,7 +29,6 @@ class PalettePanel(QListWidget):
         self._doc = doc
         self.clear()
         fixed = [
-            ("NOT", "block:NOT"),
             ("AND", "kind:AND"),
             ("OR", "kind:OR"),
             ("チェックポイント", "kind:CHECKPOINT"),
@@ -46,8 +45,6 @@ class PalettePanel(QListWidget):
         symlib_log(f"palette refresh: {len(blocks)} block rows -> {blocks}")
         logic_cad_log("palette", f"refresh {len(blocks)} library rows: {blocks}")
         for name in blocks:
-            if name.upper() == "NOT":
-                continue
             it = QListWidgetItem(name)
             it.setData(Qt.ItemDataRole.UserRole, f"block:{name}")
             self.addItem(it)

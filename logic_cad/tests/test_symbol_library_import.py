@@ -102,12 +102,12 @@ def test_list_palette_block_names_excludes_system_blocks() -> None:
     assert BLOCK_CHECKPOINT not in names
 
 
-def test_import_symbol_library_missing_file_uses_stub_not_gate(tmp_path: Path) -> None:
+def test_import_symbol_library_missing_file_ensures_system_blocks_only(tmp_path: Path) -> None:
     doc = new_document()
     missing = tmp_path / "no_such_library.dxf"
     assert not missing.is_file()
     import_symbol_library(doc, path=missing)
-    assert "NOT" in doc.blocks
+    assert "NOT" not in doc.blocks
     assert BLOCK_CHECKPOINT in doc.blocks
     assert "PAGE_TO" in doc.blocks
     assert "PAGE_FROM" in doc.blocks

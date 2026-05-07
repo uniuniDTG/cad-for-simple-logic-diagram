@@ -16,8 +16,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from logic_cad.core.model.constants import A4_LANDSCAPE_HEIGHT_MM, A4_LANDSCAPE_WIDTH_MM
 from logic_cad.core.pages.page_layout_meta import read_page_meta
+from logic_cad.ui.dialogs.page_import_dialog import run_page_import_dialog
+from logic_cad.ui.dialogs.page_ref_reorder_dialog import run_page_ref_reorder_dialog
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -48,6 +49,11 @@ def _add_page_meta_rows(
     form.addRow(PAGE_REV_LABEL, rev_editor)
 
 
+def run_import_pages_dialog(win: MainWindow) -> None:
+    """Open ``別ファイルからページを取り込み`` modal for *win*."""
+    run_page_import_dialog(win)
+
+
 def on_page_tab_bar_context(win: MainWindow, pos: QPoint) -> None:
     tab_bar = win._page_tabs.tabBar()
     idx = tab_bar.tabAt(pos)
@@ -55,11 +61,13 @@ def on_page_tab_bar_context(win: MainWindow, pos: QPoint) -> None:
         return
     menu = QMenu(win)
     menu.addAction("ページを追加…", win._show_add_page_dialog)
+    menu.addAction("別ファイルからページを取り込み…", lambda: run_import_pages_dialog(win))
     menu.addAction(
         "現在のページのプロパティ…",
         lambda: win._on_page_properties(win._diagram.current_layout_name),
     )
     menu.addAction("目次を再生成", win._regenerate_toc)
+    menu.addAction("ページ跨ぎリンクの順序…", lambda: run_page_ref_reorder_dialog(win))
     menu.exec(tab_bar.mapToGlobal(pos))
 
 
@@ -212,14 +220,31 @@ def on_page_change(win: MainWindow, name: str) -> None:
     center_view_on_current_page_content(win, prefer_page_refs=False)
 
 
-def navigate_to_page_link(win: MainWindow, page_name: str) -> None:
+def navigate_to_page_link(win: MainWindow, page_name: str, focus_peer_uid: str | None = None) -> None:
     if page_name not in win._diagram.list_pages():
         return
     win._diagram.set_current_page(page_name)
     win._scene.set_diagram(win._diagram)
     win._page_bar.sync_from_diagram()
     win._props.clear_selection()
-    center_view_on_current_page_content(win, prefer_page_refs=True)
+
+    def _go() -> None:
+        from logic_cad.ui.items.symbol_item import SymbolItem
+
+        fp = (focus_peer_uid or "").strip()
+        if fp:
+            target: QRectF | None = None
+            for it in win._scene.items():
+                if isinstance(it, SymbolItem) and it.symbol_uid == fp:
+                    target = it.sceneBoundingRect()
+                    break
+            if target is not None and not target.isEmpty() and target.isValid():
+                br = target.adjusted(-10.0, -10.0, 10.0, 10.0)
+                win._view.centerOn(br.center())
+                return
+        center_view_on_current_page_content(win, prefer_page_refs=True)
+
+    QTimer.singleShot(0, _go)
 
 
 def navigate_to_inpage_peer(win: MainWindow, peer_uid: str) -> None:

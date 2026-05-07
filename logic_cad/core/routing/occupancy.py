@@ -72,11 +72,7 @@ def banned_out_cardinals_for_hub(
     polyline_points_fn,
     exclude_wire_uids: set[str] | None = None,
 ) -> set[Cardinal]:
-    """Occupied rays at WIRE_BRANCH/CHECKPOINT for a new OUT0_MULTI fanout wire.
-
-    IN0_MULTI uses one ray; each existing OUT0_MULTI uses one ray. New OUT must pick
-    a cardinal not in this set.
-    """
+    """Occupied rays at WIRE_BRANCH/CHECKPOINT for a new hub-origin wire."""
     ex = exclude_wire_uids or set()
     banned: set[Cardinal] = set()
     for _e, wu, d in iter_wire_meta(layout_name):
@@ -87,7 +83,17 @@ def banned_out_cardinals_for_hub(
             r = hub_ray_in_from_polyline(pts)
             if r is not None:
                 banned.add(r)
+        if d.get("dst") == hub_uid and str(d.get("dst_port") or "") == "INOUT0_MULTI":
+            pts = polyline_points_fn(_e)
+            r = hub_ray_in_from_polyline(pts)
+            if r is not None:
+                banned.add(r)
         if d.get("src") == hub_uid and str(d.get("src_port") or "") == "OUT0_MULTI":
+            pts = polyline_points_fn(_e)
+            r = hub_ray_out_from_polyline(pts)
+            if r is not None:
+                banned.add(r)
+        if d.get("src") == hub_uid and str(d.get("src_port") or "") == "INOUT0_MULTI":
             pts = polyline_points_fn(_e)
             r = hub_ray_out_from_polyline(pts)
             if r is not None:

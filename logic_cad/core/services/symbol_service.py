@@ -18,6 +18,7 @@ from logic_cad.core.model.constants import (
     BLOCK_WIRE_BRANCH,
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_INPAGE_REF,
+    PAGE_REF_RANK_XDATA,
     PAGE_REF_SHOW_PAGE_DESC_XDATA,
     PAGE_REF_SHOW_PAGE_NAME_XDATA,
     PAGE_REF_SHOW_TARGET_INFO_XDATA,
@@ -32,7 +33,7 @@ from logic_cad.core.model.constants import (
 from logic_cad.core.debug.debug_log import logic_cad_log
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory, gate_view_geometry_from_block_name
 from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
-from logic_cad.core.pages.page_ref import refresh_page_ref_syms_on_layout
+from logic_cad.core.pages.page_ref import find_page_ref_insert, refresh_page_ref_syms_on_layout
 from logic_cad.core.services.layout_service import (
     ensure_checkpoint_block,
     ensure_cross_page_reference_blocks,
@@ -238,6 +239,9 @@ class SymbolService:
         pages: list[str],
         *,
         outgoing: bool = True,
+        defer_refresh: bool = False,
+        page_ref_rank: int | None = None,
+        peer_uid: str = "",
     ) -> str:
         """*outgoing=True*: **source** page (PAGE_FROM → target). *outgoing=False*: **destination** page (PAGE_TO → back ref)."""
         _ = pages
@@ -251,17 +255,17 @@ class SymbolService:
             ins.dxf.yscale = scale
             ins.dxf.zscale = scale
         uid = new_uid()
-        tags = build_ld_app_tags(
-            "1",
-            uid,
-            "PAGE_REF",
-            {
-                TARGET_LAYOUT_XDATA: target_layout,
-                "sym": sym,
-                PAGE_REF_SHOW_PAGE_NAME_XDATA: "0",
-                PAGE_REF_SHOW_PAGE_DESC_XDATA: "0",
-            },
-        )
+        extra_ld: dict[str, str] = {
+            TARGET_LAYOUT_XDATA: target_layout,
+            "sym": sym,
+            PAGE_REF_SHOW_PAGE_NAME_XDATA: "0",
+            PAGE_REF_SHOW_PAGE_DESC_XDATA: "0",
+        }
+        if page_ref_rank is not None:
+            extra_ld[PAGE_REF_RANK_XDATA] = str(int(page_ref_rank))
+        if peer_uid.strip():
+            extra_ld[PEER_UID_XDATA] = peer_uid.strip()
+        tags = build_ld_app_tags("1", uid, "PAGE_REF", extra_ld)
         set_entity_xdata(ins, tags)
         if self._block_has_attdef(bname, "SYM"):
             try:
@@ -272,8 +276,28 @@ class SymbolService:
                 self.set_attrib_visible(layout_name, uid, "SYM", False)
             except ValueError:
                 pass
-        refresh_page_ref_syms_on_layout(self.doc, layout_name)
+        if not defer_refresh:
+            refresh_page_ref_syms_on_layout(self.doc, layout_name)
         return uid
+
+    def link_page_ref_peers_cross_layout(
+        self, layout_a: str, uid_a: str, layout_b: str, uid_b: str
+    ) -> None:
+        """Set mutual ``peer_uid`` on paired PAGE_FROM / PAGE_TO (already placed)."""
+        for la, ua, peer in ((layout_a, uid_a, uid_b), (layout_b, uid_b, uid_a)):
+            ins = self.insert_by_uid(la, ua)
+            if ins is None:
+                raise ValueError("INSERT が見つかりません。")
+            if get_type(ins) != "PAGE_REF":
+                raise ValueError("ページ参照（PAGE_REF）ではありません。")
+            prev = read_ld_app_dict(ins)
+            uid_str = str(prev.get("uid") or get_uid(ins) or "")
+            if not uid_str:
+                raise ValueError("INSERT に uid がありません。")
+            extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
+            extra[PEER_UID_XDATA] = peer
+            tags = build_ld_app_tags("1", uid_str, "PAGE_REF", extra)
+            set_entity_xdata(ins, tags)
 
     def _set_inpage_peer_xdata(self, layout_name: str, uid: str, peer_uid: str) -> None:
         ins = self.insert_by_uid(layout_name, uid)
@@ -369,12 +393,72 @@ class SymbolService:
             raise ValueError("ページ参照（PAGE_REF）ではありません。")
         prev = read_ld_app_dict(ins)
         uid_str = prev.get("uid") or get_uid(ins)
+        old_peer = str(prev.get(PEER_UID_XDATA) or "").strip()
         extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
         extra[TARGET_LAYOUT_XDATA] = target_layout
         extra["sym"] = prev.get("sym", "")
+        extra.pop(PEER_UID_XDATA, None)
+        extra.pop(PAGE_REF_RANK_XDATA, None)
         tags = build_ld_app_tags("1", uid_str, "PAGE_REF", extra)
         set_entity_xdata(ins, tags)
-        refresh_page_ref_syms_on_layout(self.doc, layout_name)
+        layouts_refresh = {layout_name}
+        if old_peer:
+            pair = find_page_ref_insert(self.doc, old_peer)
+            if pair is not None:
+                lo, ent_p = pair
+                dp = read_ld_app_dict(ent_p)
+                uid_p = str(dp.get("uid") or get_uid(ent_p) or "")
+                if uid_p == old_peer and str(dp.get(PEER_UID_XDATA) or "").strip() == uid_str:
+                    extra_p = {k: v for k, v in dp.items() if k not in ("ver", "uid", "type")}
+                    extra_p.pop(PEER_UID_XDATA, None)
+                    extra_p.pop(PAGE_REF_RANK_XDATA, None)
+                    set_entity_xdata(
+                        ent_p, build_ld_app_tags("1", uid_p, "PAGE_REF", extra_p)
+                    )
+                    layouts_refresh.add(lo)
+        for ln in layouts_refresh:
+            refresh_page_ref_syms_on_layout(self.doc, ln)
+
+    def set_page_ref_rank(self, layout_name: str, uid: str, rank: int) -> None:
+        """Persist ``page_ref_rank`` on this PAGE_REF and reciprocal peer (if any); refresh affected layouts."""
+        rk = int(rank)
+        if rk < 0:
+            raise ValueError("付番は 0 以上です。")
+        ins = self.insert_by_uid(layout_name, uid)
+        if ins is None:
+            raise ValueError("INSERT が見つかりません。")
+        if get_type(ins) != "PAGE_REF":
+            raise ValueError("ページ参照（PAGE_REF）ではありません。")
+        prev = read_ld_app_dict(ins)
+        uid_str = str(prev.get("uid") or get_uid(ins) or "")
+        if not uid_str:
+            raise ValueError("INSERT に uid がありません。")
+        peer_uid = str(prev.get(PEER_UID_XDATA) or "").strip()
+
+        layouts_refresh: set[str] = set()
+
+        def _apply(ent, lo: str) -> None:
+            p = read_ld_app_dict(ent)
+            u_s = str(p.get("uid") or get_uid(ent) or "")
+            extra = {k: v for k, v in p.items() if k not in ("ver", "uid", "type")}
+            extra[PAGE_REF_RANK_XDATA] = str(rk)
+            tags = build_ld_app_tags("1", u_s, "PAGE_REF", extra)
+            set_entity_xdata(ent, tags)
+            layouts_refresh.add(lo)
+
+        _apply(ins, layout_name)
+
+        if peer_uid:
+            hit = find_page_ref_insert(self.doc, peer_uid)
+            if hit is not None:
+                lo_p, ent_p = hit
+                dp = read_ld_app_dict(ent_p)
+                uid_p = str(dp.get("uid") or get_uid(ent_p) or "")
+                if uid_p == peer_uid and str(dp.get(PEER_UID_XDATA) or "").strip() == uid_str:
+                    _apply(ent_p, lo_p)
+
+        for ln in sorted(layouts_refresh):
+            refresh_page_ref_syms_on_layout(self.doc, ln)
 
     def set_page_ref_target_info_visibility(
         self, layout_name: str, uid: str, *, show_page_name: bool, show_page_desc: bool
@@ -513,6 +597,8 @@ class SymbolService:
                     break
         if is_inpage:
             refresh_inpage_ref_syms_on_layout(self.doc, layout_name)
+        elif t == "PAGE_REF":
+            refresh_page_ref_syms_on_layout(self.doc, layout_name)
 
     def rotate_insert_relative_deg(self, layout_name: str, uid: str, delta_degrees: float) -> None:
         ins = self.insert_by_uid(layout_name, uid)
@@ -670,6 +756,9 @@ class SymbolService:
         ins.dxf.zscale = float(rec.zscale)
         nu = new_uid()
         extra = dict(rec.xdata_extra)
+        if rec.entity_type == "PAGE_REF":
+            extra.pop(PEER_UID_XDATA, None)
+            extra.pop(PAGE_REF_RANK_XDATA, None)
         tags = build_ld_app_tags("1", nu, rec.entity_type, extra)
         set_entity_xdata(ins, tags)
         seen_tag: set[str] = set()

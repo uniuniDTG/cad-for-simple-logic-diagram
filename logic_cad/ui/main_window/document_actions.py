@@ -51,13 +51,18 @@ def build_window_title(*, drawing_number: str, diagram_path: str | None, is_dirt
 
 
 def update_window_title(win: MainWindow) -> None:
-    win.setWindowTitle(
-        build_window_title(
-            drawing_number=read_drawing_number(win._diagram.doc),
-            diagram_path=win._diagram.path,
-            is_dirty=win._diagram.is_dirty(),
-        )
+    base = build_window_title(
+        drawing_number=read_drawing_number(win._diagram.doc),
+        diagram_path=win._diagram.path,
+        is_dirty=win._diagram.is_dirty(),
     )
+    suffix = ""
+    tabs = getattr(win, "_page_tabs", None)
+    if tabs is not None and tabs.currentIndex() == 2:
+        sess = win._block_panel.session()
+        if sess is not None:
+            suffix = f" — ブロック: {sess.block_name}"
+    win.setWindowTitle(base + suffix)
 
 
 def prompt_save_if_dirty(win: MainWindow) -> bool:
@@ -92,6 +97,8 @@ def prompt_save_if_dirty(win: MainWindow) -> bool:
 
 
 def new_document(win: MainWindow) -> None:
+    if not win._block_panel.request_end_session_for_nav():
+        return
     if not prompt_save_if_dirty(win):
         return
     win._diagram = LogicDiagram.new()
@@ -102,13 +109,21 @@ def new_document(win: MainWindow) -> None:
     win._page_bar.sync_from_diagram()
     win._props.clear_selection()
     win._symbol_clipboard = None
+    win._block_edit_entity_clipboard = None
     win._refresh_palette()
     win._tool_bridge.reset_routing_and_sketch_tools()
+    win._block_panel.clear_session_and_history()
+    win._block_panel.refresh_block_list()
+    win._page_tabs.setCurrentIndex(0)
+    win._center_stack.setCurrentIndex(0)
+    win._last_tab_index = 0
     QTimer.singleShot(0, win._view.fit_a4_page)
     update_window_title(win)
 
 
 def open_document(win: MainWindow) -> None:
+    if not win._block_panel.request_end_session_for_nav():
+        return
     if not prompt_save_if_dirty(win):
         return
     path, _ = QFileDialog.getOpenFileName(win, "DXF を開く", "", "DXF (*.dxf)")
@@ -126,7 +141,13 @@ def open_document(win: MainWindow) -> None:
     win._page_bar.sync_from_diagram()
     win._refresh_palette()
     win._symbol_clipboard = None
+    win._block_edit_entity_clipboard = None
     win._tool_bridge.reset_routing_and_sketch_tools()
+    win._block_panel.clear_session_and_history()
+    win._block_panel.refresh_block_list()
+    win._page_tabs.setCurrentIndex(0)
+    win._center_stack.setCurrentIndex(0)
+    win._last_tab_index = 0
     QTimer.singleShot(0, win._view.fit_a4_page)
     update_window_title(win)
 

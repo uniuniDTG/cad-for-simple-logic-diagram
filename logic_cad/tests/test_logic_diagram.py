@@ -123,12 +123,12 @@ def test_checkpoint_to_wire_branch_multi_fanout():
         hub = d.place_wire_branch((34.0, 14.0))
     with d.begin("wire"):
         d.connect_ports(a, "OUT0_LOGIC", cp, "IN0_MULTI")
-        d.connect_ports(cp, "OUT0_MULTI", hub, "IN0_MULTI")
-        d.connect_ports(hub, "OUT0_MULTI", b, "IN0_LOGIC")
-        d.connect_ports(hub, "OUT0_MULTI", c, "IN0_LOGIC")
-        d.connect_ports(hub, "OUT0_MULTI", d_gate, "IN0_LOGIC")
+        d.connect_ports(cp, "OUT0_MULTI", hub, "INOUT0_MULTI")
+        d.connect_ports(hub, "INOUT0_MULTI", b, "IN0_LOGIC")
+        d.connect_ports(hub, "INOUT0_MULTI", c, "IN0_LOGIC")
+        d.connect_ports(hub, "INOUT0_MULTI", d_gate, "IN0_LOGIC")
     d.rebuild_index()
-    n = count_wires_from_src_port(d, d.current_layout_name, hub, "OUT0_MULTI")
+    n = count_wires_from_src_port(d, d.current_layout_name, hub, "INOUT0_MULTI")
     assert n == 3
 
 
@@ -140,13 +140,12 @@ def test_connect_ports_reverse_in_out_normalizes_to_out_in():
         wb = d.place_wire_branch((30.0, 10.0))
     d.rebuild_index()
     with d.begin("wire"):
-        d.connect_ports(a, "IN0_LOGIC", wb, "OUT0_MULTI")
+        d.connect_ports(a, "IN0_LOGIC", wb, "INOUT0_MULTI")
     d.rebuild_index()
     metas = [m for _e, _wu, m in d.wires.iter_wire_meta(d.current_layout_name)]
     assert len(metas) == 1
-    assert_wire_meta_canonical_out_to_in(metas[0])
     assert metas[0]["src"] == wb
-    assert metas[0]["src_port"] == "OUT0_MULTI"
+    assert metas[0]["src_port"] == "INOUT0_MULTI"
     assert metas[0]["dst"] == a
     assert metas[0]["dst_port"] == "IN0_LOGIC"
 
@@ -182,7 +181,7 @@ def test_connect_ports_in_in_with_hub_not_orientation_error():
     d.rebuild_index()
     try:
         with d.begin("w"):
-            d.connect_ports(a, "IN0_LOGIC", wb, "IN0_MULTI")
+            d.connect_ports(a, "IN0_LOGIC", wb, "INOUT0_MULTI")
     except ValueError as e:
         assert "両端がINポート" not in str(e)
 
@@ -196,6 +195,6 @@ def test_connect_ports_out_out_with_hub_not_orientation_error():
     d.rebuild_index()
     try:
         with d.begin("w"):
-            d.connect_ports(wb, "OUT0_MULTI", n, "OUT0_LOGIC")
+            d.connect_ports(wb, "INOUT0_MULTI", n, "OUT0_LOGIC")
     except ValueError as e:
         assert "両端がOUTポート" not in str(e)

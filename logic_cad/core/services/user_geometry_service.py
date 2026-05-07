@@ -35,6 +35,7 @@ from logic_cad.core.model.user_sketch_layers import (
 )
 from logic_cad.core.pages.page_order import list_paper_layout_names_sorted
 from logic_cad.core.routing import snap_to_grid
+from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
 from logic_cad.core.undo.history import destroy_entity, find_entity_by_uid
 from logic_cad.core.symbol_clipboard import UserSketchCopyRecord
 from logic_cad.core.model.xdata import (
@@ -426,7 +427,31 @@ class UserGeometryService:
             return True
         return False
 
-    def set_user_text_props(self, layout_name: str, uid: str, text: str, height_mm: float) -> bool:
+    def set_user_text_props(
+        self,
+        layout_name: str,
+        uid: str,
+        text: str,
+        height_mm: float,
+        *,
+        halign: int | None = None,
+    ) -> bool:
+        """Update USER_TEXT content and optional horizontal alignment (DXF halign 0–2).
+
+        When ``halign`` is set, the current normalized anchor is kept while
+        ``insert`` and ``align_point`` are synced for non-left alignments.
+
+        Args:
+            layout_name: Active paper layout (unused; kept for API symmetry).
+            uid: USER_TEXT entity UID.
+            text: New string.
+            height_mm: Cap height in mm.
+            halign: If not ``None``, set horizontal alignment (0=left, 1=center, 2=right).
+
+        Returns:
+            True if the TEXT entity was updated.
+        """
+
         _ = layout_name
         e = find_entity_by_uid(self.doc, uid)
         if e is None or e.dxftype() != "TEXT":
@@ -435,6 +460,15 @@ class UserGeometryService:
             return False
         e.dxf.text = text
         e.dxf.height = max(0.25, float(height_mm))
+        if halign is not None:
+            ha = int(halign)
+            if ha not in (0, 1, 2):
+                ha = 0
+            lay = normalize_dxf_text_entity(e)
+            ax, ay = float(lay.anchor_x), float(lay.anchor_y)
+            e.dxf.halign = ha
+            e.dxf.insert = (ax, ay, 0.0)
+            e.dxf.align_point = (ax, ay, 0.0)
         return True
 
     def set_user_line_geometry(
@@ -467,7 +501,9 @@ class UserGeometryService:
             return False
         if get_type(e) != ENTITY_TYPE_USER_TEXT:
             return False
-        e.dxf.insert = (float(insert[0]), float(insert[1]), 0.0)
+        x, y = float(insert[0]), float(insert[1])
+        e.dxf.insert = (x, y, 0.0)
+        e.dxf.align_point = (x, y, 0.0)
         return True
 
     def set_user_cloud_geometry(

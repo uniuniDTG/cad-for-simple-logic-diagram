@@ -73,3 +73,41 @@ def test_set_user_cloud_linetype_updates_layer_and_entity_linetype() -> None:
     assert cloud_entity is not None
     assert str(cloud_entity.dxf.layer) == LAYER_USER_CLOUD_CENTER
     assert str(cloud_entity.dxf.linetype).upper() == "CENTER"
+
+
+def test_set_user_text_props_with_halign_syncs_insert_and_align_point() -> None:
+    """Optional halign applies DXF 0–2 and keeps geometric anchor."""
+
+    doc = new_document()
+    layout_name = first_paper_layout_name(doc)
+    svc = UserGeometryService(doc)
+
+    uid = svc.add_text(layout_name, (12.0, 8.0), "M", 2.5)
+    entity = find_entity_by_uid(doc, uid)
+    assert entity is not None
+    assert int(getattr(entity.dxf, "halign", 0) or 0) == 0
+
+    assert svc.set_user_text_props(layout_name, uid, "M", 2.5, halign=1) is True
+    assert int(entity.dxf.halign) == 1
+    assert float(entity.dxf.insert.x) == 12.0 and float(entity.dxf.insert.y) == 8.0
+    assert float(entity.dxf.align_point.x) == 12.0 and float(entity.dxf.align_point.y) == 8.0
+
+
+def test_set_user_text_props_without_halign_preserves_halign() -> None:
+    """Find/replace-style updates must not reset alignment fields."""
+
+    doc = new_document()
+    layout_name = first_paper_layout_name(doc)
+    svc = UserGeometryService(doc)
+
+    uid = svc.add_text(layout_name, (1.0, 2.0), "a", 3.0)
+    entity = find_entity_by_uid(doc, uid)
+    assert entity is not None
+    entity.dxf.halign = 2
+    entity.dxf.align_point = (9.0, 8.0, 0.0)
+    entity.dxf.insert = (9.0, 8.0, 0.0)
+
+    assert svc.set_user_text_props(layout_name, uid, "b", 3.0) is True
+    assert int(entity.dxf.halign) == 2
+    assert float(entity.dxf.insert.x) == 9.0
+    assert float(entity.dxf.align_point.x) == 9.0

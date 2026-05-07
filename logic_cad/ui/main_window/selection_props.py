@@ -42,6 +42,10 @@ def _gate_n_from_block(name: str) -> int | None:
 
 
 def on_selection_changed(win: MainWindow) -> None:
+    from logic_cad.ui.main_window.edit_actions import _block_edit_tab_active
+
+    if _block_edit_tab_active(win):
+        return
     from logic_cad.ui.items.symbol_item import SymbolItem
     from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserCloudItem, UserLineItem, UserTextItem
     from logic_cad.ui.items.wire_item import WireItem

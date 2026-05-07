@@ -31,6 +31,7 @@ from logic_cad.core.model.constants import (
     ENTITY_TYPE_WIRE_BRANCH_HATCH,
     LAYER_CONTENTS_AREA,
     LAYER_FRAME,
+    LAYER_PORT_INOUT0_MULTI,
     LAYER_PORT_IN0_MULTI,
     LAYER_PORT_OUT0_MULTI,
     LAYER_SYMBOL,
@@ -47,6 +48,7 @@ from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, load_dxf_w
 from logic_cad.core.dxf.dxf_validator import validate as validate_dxf_document
 from logic_cad.core.debug.debug_log import logic_cad_log
 from logic_cad.core.debug.debug_symlib import symlib_log
+from logic_cad.core.pages.page_layout_meta import merge_layout_page_xdata, read_page_meta
 from logic_cad.core.pages.page_order import (
     is_reserved_toc_page_id,
     is_toc_layout_name,
@@ -55,8 +57,12 @@ from logic_cad.core.pages.page_order import (
 )
 from logic_cad.core.undo.history import destroy_entity
 from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
-from logic_cad.core.pages.page_ref import refresh_all_page_ref_syms, remap_page_refs
-from logic_cad.core.pages.page_ref import refresh_page_ref_syms_on_layout
+from logic_cad.core.pages.page_ref import (
+    reconnect_page_ref_peers_after_foreign_import,
+    refresh_all_page_ref_syms,
+    refresh_page_ref_syms_on_layout,
+    remap_page_refs,
+)
 from logic_cad.core.model.xdata import (
     build_ld_app_tags,
     ensure_regapp,
@@ -322,12 +328,12 @@ def list_palette_block_names(doc: Drawing) -> list[str]:
 
 
 def import_symbol_library(doc: Drawing, path: Path | None = None) -> None:
-    """Merge blocks from symbol_library.dxf (or minimal stub if missing)."""
+    """Merge blocks from symbol_library.dxf (or only system blocks if file missing)."""
     p = path or (_assets_dir() / "symbol_library.dxf")
     symlib_log(f"import_symbol_library path={p} exists={p.is_file()}")
     if not p.is_file():
-        symlib_log("no symbol_library file; NOT stub only")
-        _ensure_stub_not_gate(doc)
+        symlib_log("no symbol_library file; ensuring page ref / checkpoint / wire branch blocks only")
+        ensure_cross_page_reference_blocks(doc)
         ensure_checkpoint_block(doc)
         ensure_wire_branch_block(doc)
         return
@@ -356,8 +362,6 @@ def import_symbol_library(doc: Drawing, path: Path | None = None) -> None:
     if skipped:
         symlib_log(f"DXFStructureError on {len(skipped)} blocks (first 5): {skipped[:5]}")
     ensure_cross_page_reference_blocks(doc)
-    # Library may omit blocks the app still expects (e.g. NOT in unit tests / minimal libs).
-    _ensure_stub_not_gate(doc)
     ensure_checkpoint_block(doc)
     ensure_wire_branch_block(doc)
 
@@ -379,7 +383,7 @@ def reload_symbol_library(doc: Drawing, path: Path | None = None) -> None:
 
     Note:
         If *path* does not exist, behavior matches :func:`import_symbol_library`
-        (stub NOT gate and minimal blocks only).
+        (system blocks only; no symbol merges).
     """
     p = path or (_assets_dir() / "symbol_library.dxf")
     symlib_log(f"reload_symbol_library path={p} exists={p.is_file()}")
@@ -444,7 +448,6 @@ def reload_symbol_library(doc: Drawing, path: Path | None = None) -> None:
     if skipped:
         symlib_log(f"DXFStructureError on reload (first 5): {skipped[:5]}")
     ensure_cross_page_reference_blocks(doc)
-    _ensure_stub_not_gate(doc)
     ensure_checkpoint_block(doc)
     ensure_wire_branch_block(doc)
 
@@ -668,12 +671,11 @@ def ensure_checkpoint_block(doc: Drawing) -> None:
 
 
 def ensure_wire_branch_block(doc: Drawing) -> None:
-    """Ensure ``LD_WIRE_BRANCH`` exists (IN0_MULTI / OUT0_MULTI at origin; circle glyph; SYM)."""
+    """Ensure ``LD_WIRE_BRANCH`` exists (INOUT0_MULTI at origin; circle glyph; SYM)."""
     if BLOCK_WIRE_BRANCH in doc.blocks:
         return
     blk = doc.blocks.new(BLOCK_WIRE_BRANCH)
-    blk.add_point((0.0, 0.0), dxfattribs={"layer": LAYER_PORT_IN0_MULTI})
-    blk.add_point((0.0, 0.0), dxfattribs={"layer": LAYER_PORT_OUT0_MULTI})
+    blk.add_point((0.0, 0.0), dxfattribs={"layer": LAYER_PORT_INOUT0_MULTI})
     r = float(WIRE_BRANCH_RADIUS_MM)
     blk.add_circle((0.0, 0.0), r, dxfattribs={"layer": LAYER_SYMBOL, "color": 7})
     hatch = blk.add_hatch(color=7, dxfattribs={"layer": LAYER_SYMBOL})
@@ -686,27 +688,6 @@ def ensure_wire_branch_block(doc: Drawing) -> None:
         height=0.22,
         dxfattribs={"layer": LAYER_TEXT},
     )
-
-
-def _ensure_stub_not_gate(doc: Drawing) -> None:
-    """Minimal NOT gate for demos when asset file is absent."""
-    if "NOT" in doc.blocks:
-        return
-    blk = doc.blocks.new("NOT")
-    blk.add_line((0, 0), (0, 2), dxfattribs={"layer": LAYER_SYMBOL})
-    blk.add_line((0, 2), (2, 2), dxfattribs={"layer": LAYER_SYMBOL})
-    blk.add_line((2, 2), (2, 0), dxfattribs={"layer": LAYER_SYMBOL})
-    blk.add_line((2, 0), (0, 0), dxfattribs={"layer": LAYER_SYMBOL})
-    blk.add_point((0, 1), dxfattribs={"layer": "LD_PORT_IN0_LOGIC"})
-    blk.add_point((2, 1), dxfattribs={"layer": "LD_PORT_OUT0_LOGIC"})
-    blk.add_attdef(
-        tag="SYM",
-        text="NOT",
-        insert=(0.3, 2.3),
-        height=0.28,
-        dxfattribs={"layer": LAYER_TEXT},
-    )
-    ensure_cross_page_reference_blocks(doc)
 
 
 def _paper_frame_attrib_defaults(doc: Drawing) -> dict[str, str]:
@@ -788,6 +769,67 @@ def import_frame_template(doc: Drawing, layout_name: str, path: Path | None = No
         f"template: applied block-only frame from {chosen} into layout {layout_name!r}",
     )
     return 1
+
+
+def remap_layout_block_ld_uids(dest_blk: object, old_to_new: dict[str, str]) -> None:
+    """Apply *old_to_new* uid map to LD-tagged entities in a paper layout block.
+
+    Phase 1 assigns new ``uid`` in XDATA on every mapped entity; phase 2 remaps ``WIRE``,
+    ``WIRE_ALIAS``, wire-branch hatch dependencies, ``INPAGE_REF``, and ``PAGE_REF`` peer
+    UIDs embedded in dictionaries.
+
+    Args:
+        dest_blk: Block layout (paperspace layout block record).
+        old_to_new: Mapping from previously collected UIDs to new UIDs.
+    """
+    for ent in list(dest_blk):
+        u = get_uid(ent)
+        if not u:
+            continue
+        nu = old_to_new.get(u)
+        if not nu:
+            continue
+        d = read_ld_app_dict(ent)
+        t = get_type(ent) or "SYM"
+        extra = {k: v for k, v in d.items() if k not in ("ver", "uid", "type")}
+        set_entity_xdata(ent, build_ld_app_tags("1", nu, t, extra))
+
+    for ent in list(dest_blk):
+        t = get_type(ent)
+        if not t:
+            continue
+        d = read_ld_app_dict(ent)
+        nu = d.get("uid")
+        if not nu:
+            continue
+        extra = {k: v for k, v in d.items() if k not in ("ver", "uid", "type")}
+        if t == "WIRE":
+            su, du = extra.get("src"), extra.get("dst")
+            if su in old_to_new:
+                extra["src"] = old_to_new[su]
+            if du in old_to_new:
+                extra["dst"] = old_to_new[du]
+            set_entity_xdata(ent, build_ld_app_tags("1", nu, "WIRE", extra))
+        elif t == ENTITY_TYPE_WIRE_BRANCH_HATCH:
+            b = extra.get("branch")
+            if b in old_to_new:
+                extra["branch"] = old_to_new[b]
+            set_entity_xdata(ent, build_ld_app_tags("1", nu, ENTITY_TYPE_WIRE_BRANCH_HATCH, extra))
+        elif t == "WIRE_ALIAS":
+            w = extra.get("wire")
+            if w in old_to_new:
+                extra["wire"] = old_to_new[w]
+            set_entity_xdata(ent, build_ld_app_tags("1", nu, "WIRE_ALIAS", extra))
+        elif t == ENTITY_TYPE_INPAGE_REF:
+            p = (extra.get(PEER_UID_XDATA) or "").strip()
+            if p in old_to_new:
+                extra[PEER_UID_XDATA] = old_to_new[p]
+            set_entity_xdata(ent, build_ld_app_tags("1", nu, ENTITY_TYPE_INPAGE_REF, extra))
+        elif t == "PAGE_REF":
+            peer = (extra.get(PEER_UID_XDATA) or "").strip()
+            if peer in old_to_new:
+                extra[PEER_UID_XDATA] = old_to_new[peer]
+                set_entity_xdata(ent, build_ld_app_tags("1", nu, "PAGE_REF", extra))
 
 
 class LayoutService:
@@ -883,6 +925,140 @@ class LayoutService:
         self.doc.layouts.delete(layout_name)
         refresh_all_page_ref_syms(self.doc)
 
+    def suggest_import_dest_layout_name(self, desired: str) -> str:
+        """Return *desired* if unused; else a unique paper layout name for import.
+
+        Args:
+            desired: Preferred layout name from the source document.
+
+        Returns:
+            A name valid for ``layouts.new`` in this document.
+        """
+        validate_paper_layout_name(desired)
+        if desired not in self.doc.layouts:
+            return desired
+        base = f"{desired}_imp"
+        name = base
+        n = 1
+        while name in self.doc.layouts:
+            name = f"{base}{n}"
+            n += 1
+        validate_paper_layout_name(name)
+        return name
+
+    def import_paper_layouts_from_foreign_drawing(
+        self,
+        foreign_doc: Drawing,
+        migrations: list[tuple[str, str]],
+    ) -> list[str]:
+        """Copy paper layouts from *foreign_doc* into this document with new UIDs.
+
+        Dependent block definitions are merged with :class:`~ezdxf.addons.importer.Importer`
+        (:meth:`~ezdxf.addons.importer.Importer.import_block`); layout contents are cloned with
+        ``entity.copy()`` like :meth:`duplicate_paper_layout` so LD XDATA is preserved.
+        PAGE_REF ``peer_uid`` is fixed on imported sheets by :func:`reconnect_page_ref_peers_after_foreign_import`
+        when the partner INSERT exists on the destination drawing (``TARGET_LAYOUT`` / ranks are not rewritten).
+
+        Args:
+            foreign_doc: Source drawing (read-only use; not modified structurally here).
+            migrations: Pairs ``(source_layout_name, dest_layout_name)`` to create.
+
+        Returns:
+            List of ``dest_layout_name`` values created, in *migrations* order.
+
+        Raises:
+            ValueError: Invalid names, missing source layout, or destination already exists.
+        """
+        if not migrations:
+            return []
+        dest_names = [d for _, d in migrations]
+        if len(dest_names) != len(set(dest_names)):
+            raise ValueError("取り込み先のレイアウト名が重複しています。")
+        for src, dst in migrations:
+            if is_toc_layout_name(src):
+                raise ValueError(f"目次用レイアウト {src!r} は取り込めません。")
+            validate_paper_layout_name(dst)
+            if src not in foreign_doc.layouts:
+                raise ValueError(f"ソースにレイアウト {src!r} がありません。")
+            if dst in self.doc.layouts:
+                raise ValueError(f"レイアウト {dst!r} は既に存在します。")
+            sl = foreign_doc.layouts.get(src)
+            if sl.is_modelspace:
+                raise ValueError(f"レイアウト {src!r} はモデル空間です。")
+            papers_f = list_paper_layout_names_sorted(foreign_doc)
+            if src not in papers_f:
+                raise ValueError(f"レイアウト {src!r} は用紙レイアウトではありません。")
+
+        ensure_cross_page_reference_blocks(self.doc)
+        insert_blocks_needed: set[str] = set()
+        for src, _dst in migrations:
+            src_layout = foreign_doc.layouts.get(src)
+            src_blk0 = foreign_doc.blocks.get(src_layout.block_record_name)
+            for e in src_blk0:
+                if e.dxftype() == "INSERT":
+                    insert_blocks_needed.add(str(e.dxf.name))
+
+        importer = Importer(foreign_doc, self.doc)
+        for bname in sorted(insert_blocks_needed):
+            if bname not in foreign_doc.blocks:
+                logic_cad_log("layout", f"import_pages: unknown block reference {bname!r}")
+                continue
+            if bname in self.doc.blocks:
+                continue
+            try:
+                importer.import_block(bname)
+            except Exception as ex:
+                logic_cad_log("layout", f"import_block {bname!r}: {ex}")
+                raise ValueError(f"ブロック定義 {bname!r} を取り込めませんでした。") from ex
+        importer.finalize()
+
+        created: list[str] = []
+        for src, dst in migrations:
+            self.doc.layouts.new(dst)
+            self.ensure_minimal_page(dst)
+            dest_layout = self.doc.layouts.get(dst)
+            dest_blk = self.doc.blocks.get(dest_layout.block_record_name)
+            for ent in list(dest_blk):
+                destroy_entity(self.doc, ent)
+            src_layout = foreign_doc.layouts.get(src)
+            src_blk = foreign_doc.blocks.get(src_layout.block_record_name)
+            for e in list(src_blk):
+                try:
+                    ne = e.copy()
+                    dest_blk.add_entity(ne)
+                except Exception as ex:
+                    logic_cad_log("layout", f"import_page copy skip {e.dxftype()}: {ex}")
+            created.append(dst)
+
+        old_to_new: dict[str, str] = {}
+        for dst in created:
+            blk = self.doc.blocks.get(self.doc.layouts.get(dst).block_record_name)
+            for ent in blk:
+                u = get_uid(ent)
+                if u and u not in old_to_new:
+                    old_to_new[u] = new_uid()
+        for dst in created:
+            blk = self.doc.blocks.get(self.doc.layouts.get(dst).block_record_name)
+            remap_layout_block_ld_uids(blk, old_to_new)
+
+        for src, dst in migrations:
+            meta = read_page_meta(foreign_doc, src)
+            desc_raw = str(meta.get("page_desc") or "").strip()
+            rev_raw = str(meta.get("page_rev") or "").strip()
+            merge_layout_page_xdata(
+                self.doc,
+                dst,
+                page_desc=desc_raw if desc_raw else None,
+                page_rev=rev_raw if rev_raw else None,
+            )
+
+        src_to_dest = {s: d for s, d in migrations}
+        reconnect_page_ref_peers_after_foreign_import(self.doc, src_to_dest, created)
+        for dst in created:
+            refresh_page_ref_syms_on_layout(self.doc, dst)
+            refresh_inpage_ref_syms_on_layout(self.doc, dst)
+        return created
+
     def duplicate_paper_layout(self, source_name: str, dest_name: str) -> None:
         """Clone *source_name* paper block into a new layout *dest_name* (new UIDs; WIRE src/dst remapped)."""
         if is_toc_layout_name(source_name):
@@ -922,51 +1098,7 @@ class LayoutService:
                 continue
             old_to_new[u] = new_uid()
 
-        for e in list(dest_blk):
-            u = get_uid(e)
-            if not u:
-                continue
-            nu = old_to_new.get(u)
-            if not nu:
-                continue
-            d = read_ld_app_dict(e)
-            t = get_type(e) or "SYM"
-            extra = {k: v for k, v in d.items() if k not in ("ver", "uid", "type")}
-            set_entity_xdata(e, build_ld_app_tags("1", nu, t, extra))
-
-        for e in list(dest_blk):
-            t = get_type(e)
-            if not t:
-                continue
-            d = read_ld_app_dict(e)
-            nu = d.get("uid")
-            if not nu:
-                continue
-            extra = {k: v for k, v in d.items() if k not in ("ver", "uid", "type")}
-            if t == "WIRE":
-                su, du = extra.get("src"), extra.get("dst")
-                if su in old_to_new:
-                    extra["src"] = old_to_new[su]
-                if du in old_to_new:
-                    extra["dst"] = old_to_new[du]
-                set_entity_xdata(e, build_ld_app_tags("1", nu, "WIRE", extra))
-            elif t == ENTITY_TYPE_WIRE_BRANCH_HATCH:
-                b = extra.get("branch")
-                if b in old_to_new:
-                    extra["branch"] = old_to_new[b]
-                set_entity_xdata(e, build_ld_app_tags("1", nu, ENTITY_TYPE_WIRE_BRANCH_HATCH, extra))
-            elif t == "WIRE_ALIAS":
-                w = extra.get("wire")
-                if w in old_to_new:
-                    extra["wire"] = old_to_new[w]
-                set_entity_xdata(e, build_ld_app_tags("1", nu, "WIRE_ALIAS", extra))
-            elif t == ENTITY_TYPE_INPAGE_REF:
-                p = (extra.get(PEER_UID_XDATA) or "").strip()
-                if p in old_to_new:
-                    extra[PEER_UID_XDATA] = old_to_new[p]
-                set_entity_xdata(e, build_ld_app_tags("1", nu, ENTITY_TYPE_INPAGE_REF, extra))
-
-
+        remap_layout_block_ld_uids(dest_blk, old_to_new)
 
         refresh_page_ref_syms_on_layout(self.doc, dest_name)
         refresh_inpage_ref_syms_on_layout(self.doc, dest_name)

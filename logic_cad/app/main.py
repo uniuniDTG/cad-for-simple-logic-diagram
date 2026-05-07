@@ -13,6 +13,9 @@ from logic_cad.ui.app_user_settings import APP_DISPLAY_NAME, APP_ORG_NAME
 from logic_cad.ui.logging import install_process_stream_capture, install_python_logging_bridge
 from logic_cad.ui.main_window import MainWindow
 
+ENV_SHOW_ROUTING_BBOX = "LOGIC_CAD_SHOW_ROUTING_BBOX"
+ENV_SHOW_CONNECT_BBOX = "LOGIC_CAD_SHOW_CONNECT_BBOX"
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Logic CAD")
@@ -38,6 +41,16 @@ def main() -> None:
             "将来削除される可能性あり。"
         ),
     )
+    ap.add_argument(
+        "--show-routing-bbox",
+        action="store_true",
+        help="デバッグ用: ルーティング障害物のAABBオーバーレイを表示する。",
+    )
+    ap.add_argument(
+        "--show-connect-bbox",
+        action="store_true",
+        help="デバッグ用: 接続ポート切り欠き反映後の障害物AABBオーバーレイを表示する。",
+    )
     args = ap.parse_args()
     if args.routing_manhattan_only:
         os.environ[ENV_ROUTING_OVG] = "0"
@@ -45,6 +58,10 @@ def main() -> None:
     elif args.routing_ovg_only:
         os.environ[ENV_ROUTING_FIXED] = "0"
         os.environ.pop(ENV_ROUTING_OVG, None)
+    if args.show_routing_bbox:
+        os.environ[ENV_SHOW_ROUTING_BBOX] = "1"
+    if args.show_connect_bbox:
+        os.environ[ENV_SHOW_CONNECT_BBOX] = "1"
 
     install_process_stream_capture(forward_to_original=True)
     default_level = "DEBUG" if args.debug else os.environ.get("LOGIC_CAD_LOG_LEVEL", "WARN")

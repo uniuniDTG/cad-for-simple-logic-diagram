@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
 from logic_cad.core.model.constants import ALL_LAYERS, APPID, ENTITY_TYPE_WIRE_ARROW, LAYER_VPORT
+from logic_cad.core.model.port_key import parse_port_layer
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
 from logic_cad.core.pages.page_order import validate_paper_layout_name
@@ -14,7 +15,7 @@ from logic_cad.core.pages.page_order import validate_paper_layout_name
 if TYPE_CHECKING:
     from ezdxf.document import Drawing
 
-_PORT_LAYER_RE = re.compile(r"^LD_PORT_(IN|OUT)(\d+)_(LOGIC|VALUE|MULTI|COM)$")
+_PORT_LAYER_RE = re.compile(r"^LD_PORT_(INOUT|IN|OUT)(\d+)_(LOGIC|VALUE|MULTI|COM)$")
 
 
 def _validate_block_port_definitions(doc: Drawing) -> list[str]:
@@ -32,16 +33,18 @@ def _validate_block_port_definitions(doc: Drawing) -> list[str]:
                 issues.append(f"ブロック {name!r}: ポートレイヤー {layer!r} が重複しています（{count} 点）。")
         indexed: dict[tuple[str, str], set[int]] = defaultdict(set)
         for layer in port_layers:
-            m = _PORT_LAYER_RE.fullmatch(layer)
-            if m is None:
+            if _PORT_LAYER_RE.fullmatch(layer) is None:
                 issues.append(f"ブロック {name!r}: ポートレイヤー {layer!r} が不正です。")
                 continue
-            direction, idx_s, unit = m.groups()
-            indexed[(direction, unit)].add(int(idx_s))
+            parsed = parse_port_layer(layer)
+            if parsed is None:
+                issues.append(f"ブロック {name!r}: ポートレイヤー {layer!r} が不正です。")
+                continue
+            indexed[(parsed.direction, parsed.unit)].add(parsed.index)
         for (direction, unit), indices in sorted(indexed.items()):
             if not indices:
                 continue
-            if direction == "IN":
+            if direction in ("IN", "INOUT"):
                 # Inputs may be optional or left unwired in diagrams; block defs may use
                 # IN1+ only or non-contiguous indices (no IN0 requirement).
                 continue

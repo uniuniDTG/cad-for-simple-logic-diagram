@@ -5,9 +5,29 @@ from __future__ import annotations
 import math
 
 from PySide6.QtCore import QPointF
+from PySide6.QtWidgets import QGraphicsItem
 
 from logic_cad.core.model.constants import GRID_PITCH
 from logic_cad.core.routing import snap_to_grid
+
+
+def snap_pitch_for_qgraphics_item(item: QGraphicsItem) -> float:
+    """Return the DXF snap pitch (mm) for ``item`` based on its parent scene.
+
+    Scenes that define ``snap_pitch_mm`` (e.g. block definition editor) use a finer
+    step; otherwise the main canvas pitch :data:`~logic_cad.core.model.constants.GRID_PITCH`
+    applies.
+
+    Args:
+        item: Graphics item that may belong to a scene with ``snap_pitch_mm``.
+
+    Returns:
+        Grid step in millimetres for snapping item positions in scene coordinates.
+    """
+    sc = item.scene()
+    if sc is None:
+        return GRID_PITCH
+    return float(getattr(sc, "snap_pitch_mm", GRID_PITCH))
 
 
 def dxf_from_scene_pos(pos: QPointF) -> tuple[float, float]:
@@ -29,10 +49,24 @@ def snap_dxf_pos(x: float, y: float, pitch: float = GRID_PITCH) -> tuple[float, 
 
 
 def user_line_end_dxf_from_scene(
-    anchor_dxf: tuple[float, float], scene_pos: QPointF, shift: bool
+    anchor_dxf: tuple[float, float],
+    scene_pos: QPointF,
+    shift: bool,
+    *,
+    pitch: float = GRID_PITCH,
 ) -> tuple[float, float]:
-    """Grid-snapped end point for USER_LINE; with Shift, horizontal/vertical from anchor (sketch line tool)."""
-    tx, ty = snap_dxf_pos(*dxf_from_scene_pos(scene_pos))
+    """Grid-snapped end point for USER_LINE; with Shift, horizontal/vertical from anchor (sketch line tool).
+
+    Args:
+        anchor_dxf: Fixed endpoint in DXF mm when Shift-constraining the other leg.
+        scene_pos: Cursor position in scene coordinates.
+        shift: If True, snap to horizontal or vertical from ``anchor_dxf``.
+        pitch: Grid step in mm (block editor uses a finer pitch than the main canvas).
+
+    Returns:
+        Snapped ``(x, y)`` in DXF mm.
+    """
+    tx, ty = snap_dxf_pos(*dxf_from_scene_pos(scene_pos), pitch=pitch)
     if not shift:
         return (tx, ty)
     ax, ay = float(anchor_dxf[0]), float(anchor_dxf[1])

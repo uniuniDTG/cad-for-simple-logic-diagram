@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -76,7 +77,7 @@ def build_central_widget(win: MainWindow) -> QWidget:
     right = QWidget()
     v = QVBoxLayout(right)
     v.setContentsMargins(0, 0, 0, 0)
-    v.addWidget(win._view, 1)
+    v.addWidget(win._center_stack, 1)
 
     palette_column = QWidget()
     palette_column.setObjectName("paletteColumn")
@@ -117,6 +118,9 @@ def build_central_widget(win: MainWindow) -> QWidget:
     win._page_tabs.setTabToolTip(_te, "配線・図形ツール / シンボルパレット")
     _ti = win._page_tabs.addTab(win._page_bar, "ページ")
     win._page_tabs.setTabToolTip(_ti, "ドキュメント / ページ一覧")
+    _tb_block = win._page_tabs.addTab(win._block_panel, "ブロック編集")
+    win._page_tabs.setTabToolTip(_tb_block, "シンボルブロック定義のポート編集")
+    win._page_tabs.currentChanged.connect(win._on_main_tab_changed)
     _tb = win._page_tabs.tabBar()
     _tb.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
     _tb.customContextMenuRequested.connect(win._on_page_tab_bar_context)

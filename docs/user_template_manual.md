@@ -61,12 +61,14 @@ POINT を**接続端子**として使います。レイヤ名は次の形式で�
 ```text
 LD_PORT_IN{番号}_{LOGIC|VALUE|COM|MULTI}
 LD_PORT_OUT{番号}_{LOGIC|VALUE|COM|MULTI}
+LD_PORT_INOUT{番号}_{LOGIC|VALUE|COM|MULTI}
 ```
 
 例:
 
 - 入力 0（論理）: `LD_PORT_IN0_LOGIC`
 - 出力 0（論理）: `LD_PORT_OUT0_LOGIC`
+- 双方向 0（論理）: `LD_PORT_INOUT0_LOGIC`
 
 番号は 0 始まりで連番にしてください（アプリのポートキーと一致させるため）。
 
@@ -201,7 +203,7 @@ doc.saveas("logic_cad/assets/symbol_library.dxf")
 | **`LD_SYMBOL`**（`LAYER_SYMBOL`） | `LINE`, `LWPOLYLINE`, `ARC`, `CIRCLE`, `HATCH`, … | シンボル**外形**（ブロック内の描画線・塗り） |
 | **`LD_TEXT`**（`LAYER_TEXT`） | `ATTDEF`（推奨） | **`SYM` 等**の属性定義 |
 | **`LD_FRAME_TEXT`**（`LAYER_FRAME_TEXT`） | `ATTDEF`（`LD_PAPER_FRAME` 内） | **図枠タイトル帯**（`DWG_NO` 等） |
-| **`LD_PORT`**（`LAYER_PORT`） | 互換・予備 | ポート判定には使わず、**実ポートは必ず後述の `LD_PORT_IN…` / `OUT…`** |
+| **`LD_PORT`**（`LAYER_PORT`） | 互換・予備 | ポート判定には使わず、**実ポートは必ず後述の `LD_PORT_IN…` / `OUT…` / `INOUT…`** |
 | **`LD_WIRE_LOGIC`**（`LAYER_WIRE_LOGIC`） | `LWPOLYLINE`（XDATA type=WIRE, unit=LOGIC） | **論理**配線 |
 | **`LD_WIRE_VALUE`**（`LAYER_WIRE_VALUE`） | `LWPOLYLINE`（XDATA type=WIRE, unit=VALUE） | **値**配線 |
 | **`LD_WIRE_BRIDGE`**（`LAYER_WIRE_BRIDGE`） | `ARC` | **交差部のブリッジ**（自動） |
@@ -217,11 +219,13 @@ doc.saveas("logic_cad/assets/symbol_library.dxf")
 正規表現で解釈されます（`logic_cad.core.model.index_store` と同じ）:
 
 ```text
-LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|COM|MULTI)
+LD_PORT_(IN|OUT|INOUT)(番号)_(LOGIC|VALUE|COM|MULTI)
 ```
 
-- 例: `LD_PORT_IN0_LOGIC`, `LD_PORT_OUT0_LOGIC`
+- 例: `LD_PORT_IN0_LOGIC`, `LD_PORT_OUT0_LOGIC`, `LD_PORT_INOUT0_LOGIC`
 - **番号は 0 始まり**。アプリ内部のポートキー（例: `IN0_LOGIC`）と対応。
+- `INOUT` は双方向ポートです。原則として **同一ポートには合計1本まで**（入力/出力の合算）接続できます。  
+  ただし **`WIRE_BRANCH` の `INOUT0_MULTI` は例外**で、分岐用に複数接続を許可します。
 
 ### 6-3. テキスト（レイヤ × 属性）
 
@@ -231,7 +235,7 @@ LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|COM|MULTI)
 - **タグ名:** **`SYM`**（表示名）、**`STATIC_LABEL0`**（ゲート用）、**`LABEL0` 等**（任意ラベル）。
 - **レイヤ名 `LD_LABEL0` は使わない**（ラベル種別は **ATTDEF のタグ**で区別）。
 
-**まとめ:** 形状は **`LD_SYMBOL`**、属性テキストは **`LD_TEXT` + ATTDEF タグ**、接続点は **`LD_PORT_IN…` / `OUT…`**。
+**まとめ:** 形状は **`LD_SYMBOL`**、属性テキストは **`LD_TEXT` + ATTDEF タグ**、接続点は **`LD_PORT_IN…` / `OUT…` / `INOUT…`**。
 
 ---
 
@@ -240,6 +244,6 @@ LD_PORT_(IN|OUT)(番号)_(LOGIC|VALUE|COM|MULTI)
 | 現象 | 確認すること |
 |------|----------------|
 | パレットにシンボルが出ない | `symbol_library.dxf` のパスと、BLOCK 名が `*` で始まっていないか |
-| ポートに繋がらない | POINT のレイヤ名が `LD_PORT_IN*_LOGIC` 等の規則か |
+| ポートに繋がらない | POINT のレイヤ名が `LD_PORT_IN*_LOGIC` / `LD_PORT_OUT*_LOGIC` / `LD_PORT_INOUT*_LOGIC` 等の規則か |
 | NOT が無いと言われる | ライブラリに `NOT` ブロックを追加するか、アプリのスタブに任せる |
 | インポートエラー | DXF バージョン・破損、`Importer` の制約。別名でブロックを分割して再保存 |
