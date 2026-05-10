@@ -25,8 +25,21 @@ from logic_cad.core.services.block_edit_clipboard import (
     encode_entity_payloads,
     paste_entity_clipboard_root,
 )
-from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserCloudItem, UserLineItem, UserTextItem
-from logic_cad.ui.symbol_block_editor.scene import ITEM_KIND_ATTDEF, ITEM_KIND_GEOM, ITEM_KIND_PORT
+from logic_cad.ui.items.symbol_item import SymbolItem
+from logic_cad.ui.items.user_geometry_items import (
+    UserArcItem,
+    UserCircleItem,
+    UserCloudItem,
+    UserLineItem,
+    UserTextItem,
+)
+from logic_cad.ui.symbol_block_editor.scene import (
+    ITEM_KIND_ATTDEF,
+    ITEM_KIND_BLOCK_MTEXT,
+    ITEM_KIND_BLOCK_TEXT,
+    ITEM_KIND_GEOM,
+    ITEM_KIND_PORT,
+)
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -67,11 +80,13 @@ def _block_edit_selection_keys(scene) -> list[tuple[str, str]]:
     for it in scene.selectedItems():
         kind = str(it.data(1) or "")
         h = str(it.data(0) or "")
-        if kind in (ITEM_KIND_PORT, ITEM_KIND_GEOM, ITEM_KIND_ATTDEF) and h:
+        if kind in (ITEM_KIND_PORT, ITEM_KIND_GEOM, ITEM_KIND_ATTDEF, ITEM_KIND_BLOCK_TEXT, ITEM_KIND_BLOCK_MTEXT) and h:
             refs.append(("handle", h))
         elif isinstance(it, UserLineItem):
             refs.append(("uid", it.sketch_uid))
         elif isinstance(it, UserCircleItem):
+            refs.append(("uid", it.sketch_uid))
+        elif isinstance(it, UserArcItem):
             refs.append(("uid", it.sketch_uid))
     seen: set[str] = set()
     ordered: list[tuple[str, str]] = []
@@ -157,8 +172,6 @@ def copy_symbol_selection(win: MainWindow) -> None:
     if win._page_tabs.currentIndex() == 2:
         copy_block_edit_selection(win)
         return
-    from logic_cad.ui.items.symbol_item import SymbolItem
-
     sym_uids: list[str] = []
     sketch_uids: list[str] = []
     for it in win._scene.selectedItems():
@@ -170,7 +183,9 @@ def copy_symbol_selection(win: MainWindow) -> None:
             ):
                 continue
             sym_uids.append(it.symbol_uid)
-        elif isinstance(it, (UserLineItem, UserCircleItem, UserCloudItem, UserTextItem)):
+        elif isinstance(
+            it, (UserLineItem, UserCircleItem, UserArcItem, UserCloudItem, UserTextItem)
+        ):
             sketch_uids.append(it.sketch_uid)
     if not sym_uids and not sketch_uids:
         return

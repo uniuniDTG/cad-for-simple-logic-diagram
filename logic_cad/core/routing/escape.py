@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from logic_cad.core.debug.debug_log import logic_cad_debug_routing_verbose, logic_cad_log
+from logic_cad.core.geometry.manhattan_metrics import manhattan_distance
 from logic_cad.core.model.constants import (
     GRID_PITCH,
     ROUTE_ESCAPE_MM,
     ROUTING_VERTICAL_LANE_SPACING_MM,
 )
-from logic_cad.core.debug.debug_log import logic_cad_debug_routing_verbose, logic_cad_log
 from ._format import fmt_pt
 from .constrained_router import route_manhattan_ovg_layers
 from .escape_geometry import ensure_min_escape_distance
@@ -32,7 +33,7 @@ def apply_vertical_lane_stagger(
         x1, y1 = pts[i + 1]
         if abs(x0 - x1) >= 1e-9:
             continue
-        ln = abs(y1 - y0)
+        ln = manhattan_distance((x0, y0), (x1, y1))
         if ln > best_len:
             best_len = ln
             best_i = i

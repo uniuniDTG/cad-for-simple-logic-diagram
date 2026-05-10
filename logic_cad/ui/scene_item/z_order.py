@@ -6,12 +6,12 @@ source of truth for the main editing band.
 Routing overlays in ``DiagramScene`` (values around 10000) are intentionally **not**
 listed here; they are ephemeral preview geometry in a separate band.
 
-Stack from back to front (increasing Z):
+    Stack from back to front (increasing Z):
 
     - Frame/VPORT preview polylines (non-uid layout guides)
     - Paper-like symbols (frame / TOC chrome)
     - Passive DXF mirror (no LD_APP uid)
-    - User sketch entities (cloud, circle, text, line)
+    - User sketch entities (cloud, circle, arc, text, line)
     - WIRE polylines
     - Logic symbols and wire-arrow decorations
 """
@@ -27,9 +27,10 @@ CANVAS_Z_PAPER_LIKE_SYMBOL: float = -20.0
 # Non-interactive mirror of uid-less DXF entities (external CAD, stripped XDATA).
 CANVAS_Z_PASSIVE_DXF_MIRROR: float = -10.0
 
-# USER_CLOUD / USER_CIRCLE / USER_TEXT / USER_LINE (relative order: cloud back, line front).
+# USER_CLOUD / USER_CIRCLE / USER_ARC / USER_TEXT / USER_LINE (relative order).
 CANVAS_Z_USER_CLOUD: float = -5.4
 CANVAS_Z_USER_CIRCLE: float = -5.3
+CANVAS_Z_USER_ARC: float = -5.25
 CANVAS_Z_USER_TEXT: float = -5.2
 CANVAS_Z_USER_LINE: float = -5.1
 

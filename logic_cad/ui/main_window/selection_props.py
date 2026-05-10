@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 from logic_cad.core.model.constants import (
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_INPAGE_REF,
+    INPAGE_LINK_NAME_AUTO_XDATA,
     INPAGE_SYM_HEIGHT_MM,
     INPAGE_SYM_HEIGHT_XDATA,
+    ENTITY_TYPE_USER_ARC,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
@@ -26,6 +28,16 @@ from logic_cad.core.model.constants import (
 )
 from logic_cad.core.model.xdata import get_type, read_ld_app_dict
 from logic_cad.core.undo.history import find_entity_by_uid
+from logic_cad.ui.main_window.edit_actions import _block_edit_tab_active
+from logic_cad.ui.items.symbol_item import SymbolItem
+from logic_cad.ui.items.user_geometry_items import (
+    UserArcItem,
+    UserCircleItem,
+    UserCloudItem,
+    UserLineItem,
+    UserTextItem,
+)
+from logic_cad.ui.items.wire_item import WireItem
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -42,13 +54,8 @@ def _gate_n_from_block(name: str) -> int | None:
 
 
 def on_selection_changed(win: MainWindow) -> None:
-    from logic_cad.ui.main_window.edit_actions import _block_edit_tab_active
-
     if _block_edit_tab_active(win):
         return
-    from logic_cad.ui.items.symbol_item import SymbolItem
-    from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserCloudItem, UserLineItem, UserTextItem
-    from logic_cad.ui.items.wire_item import WireItem
 
     sel = win._scene.selectedItems()
     if not sel:
@@ -78,6 +85,9 @@ def on_selection_changed(win: MainWindow) -> None:
         return
     if isinstance(it, UserCircleItem):
         win._props.show_user_sketch(it.sketch_uid, entity_type=ENTITY_TYPE_USER_CIRCLE)
+        return
+    if isinstance(it, UserArcItem):
+        win._props.show_user_sketch(it.sketch_uid, entity_type=ENTITY_TYPE_USER_ARC)
         return
     if isinstance(it, UserCloudItem):
         win._props.show_user_sketch(it.sketch_uid, entity_type=ENTITY_TYPE_USER_CLOUD)
@@ -137,10 +147,12 @@ def on_selection_changed(win: MainWindow) -> None:
                     break
         if sym_h is None:
             sym_h = INPAGE_SYM_HEIGHT_MM
+        link_auto = (xd.get(INPAGE_LINK_NAME_AUTO_XDATA) or "1").strip() != "0"
         win._props.show_inpage_ref(
             it.symbol_uid,
             xd.get(PEER_UID_XDATA, ""),
             xd.get("sym", sym_text),
+            link_name_auto=link_auto,
             sym_height_mm=sym_h,
             block_name=ins.dxf.name,
             entity_type=str(t),

@@ -2,49 +2,49 @@ from __future__ import annotations
 
 from ezdxf.document import Drawing
 
+from logic_cad.core.geometry.manhattan_metrics import manhattan_distance
 from logic_cad.core.graph.wire_graph_deps import WireGraphDeps
+from logic_cad.core.model.connection_graph import ports_compatible, resolve_wire_unit
 from logic_cad.core.model.constants import (
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_WIRE_BRANCH,
     GRID_PITCH,
     LINETYPE_LOGIC,
     LINETYPE_VALUE,
-    ROUTE_ESCAPE_MM,
     MIN_AND_OR_INPUTS,
+    ROUTE_ESCAPE_MM,
 )
-from logic_cad.core.model.wire_layers import is_wire_layer
-from logic_cad.core.model.connection_graph import ports_compatible, resolve_wire_unit
 from logic_cad.core.model.index_store import IndexStore
+from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.wire_port_helpers import _and_or_input_count, _port_index
 from logic_cad.core.model.xdata import build_ld_app_tags, get_type, get_uid, new_uid, read_ld_app_dict, set_entity_xdata
-from logic_cad.core.obstacles import (
+from logic_cad.core.paper_layout_access import paper_layout_block
+from logic_cad.core.routing.wire_routing_from_document import (
+    DEFAULT_ROUTING_PROFILE,
+    RoutingProfile,
     build_routing_obstacles,
     build_symbol_only_routing_obstacles,
+    dedupe_colinear,
     estimate_port_facing,
+    path_hits_obstacles,
     reserved_path_obstacles,
+    route_manhattan_with_escape,
+    snap_to_grid,
     symbol_obstacles,
     wire_obstacles,
 )
-from logic_cad.core.routing import (
-    DEFAULT_ROUTING_PROFILE,
-    RoutingProfile,
-    dedupe_colinear,
-    path_hits_obstacles,
-    route_manhattan_with_escape,
-    snap_to_grid,
-)
+from logic_cad.core.routing.occupancy import banned_out_cardinals_for_hub
+from logic_cad.core.routing.overlap import wire_paths_to_flat_segments
 from logic_cad.core.routing.wire_polyline_geometry import (
     MANHATTAN_EPS as _MANHATTAN_EPS,
     offset_polyline_segment_parallel_xyb,
 )
+from logic_cad.core.undo.history import find_entity_by_uid
+
 
 class WireServiceCoreMixin:
     def __init__(self, doc: Drawing) -> None:
         self.doc = doc
-
-    def _layout_block(self, layout_name: str):
-        layout = self.doc.layouts.get(layout_name)
-        return self.doc.blocks.get(layout.block_record_name)
 
     def route_manhattan(
         self,
@@ -70,8 +70,6 @@ class WireServiceCoreMixin:
         IN0/OUT0 share one world point; a single axis-aligned port cutout often leaves the opposite
         side closed so paths from e.g. east cannot reach IN (cutout opened on west by tie-break).
         """
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         out: set[str] = set()
         for u in endpoint_uids:
             if not u:
@@ -87,8 +85,6 @@ class WireServiceCoreMixin:
         exclude_wire_uids: set[str] | None = None,
     ) -> list[tuple[tuple[float, float], tuple[float, float]]]:
         """Flatten other WIRE polylines to segments for collinear-overlap checks (one build per route call)."""
-        from logic_cad.core.routing.overlap import wire_paths_to_flat_segments
-
         ex = exclude_wire_uids or set()
         paths: list[list[tuple[float, float]]] = []
         for entity, wu, d in self.iter_wire_meta(layout_name):
@@ -105,9 +101,6 @@ class WireServiceCoreMixin:
         exclude_wire_uids: set[str] | None = None,
     ):
         """Cardinal directions already used at a hub (WIRE_BRANCH/CHECKPOINT OUT0_MULTI)."""
-        from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT
-        from logic_cad.core.routing.occupancy import banned_out_cardinals_for_hub
-
         t = self._symbol_entity_type(src_uid)
         if t == ENTITY_TYPE_CHECKPOINT and src_port != "OUT0_MULTI":
             return None
@@ -126,7 +119,7 @@ class WireServiceCoreMixin:
 
     def iter_wire_meta(self, layout_name: str):
         """Yield (entity, wire_uid, xdata dict)."""
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
 
         for e in blk:
             if e.dxftype() != "LWPOLYLINE" or not is_wire_layer(str(e.dxf.layer)):
@@ -139,9 +132,6 @@ class WireServiceCoreMixin:
             yield e, wu, read_ld_app_dict(e)
 
     def _symbol_entity_type(self, uid: str) -> str | None:
-        from logic_cad.core.undo.history import find_entity_by_uid
-        from logic_cad.core.model.xdata import get_type
-
         e = find_entity_by_uid(self.doc, uid)
         if e is None:
             return None
@@ -165,8 +155,6 @@ class WireServiceCoreMixin:
         self, index: IndexStore, layout_name: str, gate_uid: str
     ) -> int | None:
         """Smallest *n* so all wires with dst=this gate use only IN0…IN(n-1); at least MIN_AND_OR_INPUTS."""
-        from logic_cad.core.model.constants import MIN_AND_OR_INPUTS
-
         if _and_or_input_count(index, gate_uid) is None:
             return None
         max_idx = -1
@@ -332,7 +320,11 @@ class WireServiceCoreMixin:
             return False
         if v1x * v2x + v1y * v2y >= 0.0:
             return False
-        endpoint_leg = abs(v1x) + abs(v1y) if at_head else abs(v2x) + abs(v2y)
+        endpoint_leg = (
+            manhattan_distance((0.0, 0.0), (v1x, v1y))
+            if at_head
+            else manhattan_distance((0.0, 0.0), (v2x, v2y))
+        )
         return endpoint_leg <= tiny_tol_mm + eps
 
     def _pair_symbol_soft_obstacles(
@@ -408,9 +400,6 @@ class WireServiceCoreMixin:
         self, layout_name: str, wire_uid: str, seg_index: int, delta: float
     ) -> bool:
         """Parallel-offset one interior segment by delta (grid-snapped dx or dy); refresh bridges."""
-        from logic_cad.core.undo.history import find_entity_by_uid
-        from logic_cad.core.model.xdata import get_type
-
         if abs(delta) < _MANHATTAN_EPS:
             return True
         e = find_entity_by_uid(self.doc, wire_uid)
@@ -425,9 +414,7 @@ class WireServiceCoreMixin:
         return True
 
     def _iter_wire_polylines(self, layout_name: str):
-        blk = self._layout_block(layout_name)
-        from logic_cad.core.model.xdata import get_type
-
+        blk = paper_layout_block(self.doc, layout_name)
         for e in blk:
             if e.dxftype() != "LWPOLYLINE" or not is_wire_layer(str(e.dxf.layer)):
                 continue

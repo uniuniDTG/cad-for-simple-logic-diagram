@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import re
-
 from logic_cad.core.model.constants import WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS
 from logic_cad.core.model.index_store import IndexStore
+from logic_cad.core.model.port_key import parse_port_key
 
 
 def _and_or_input_count(index: IndexStore, uid: str) -> int | None:
@@ -22,18 +21,17 @@ def _and_or_input_count(index: IndexStore, uid: str) -> int | None:
 
 
 def _vertical_lane_from_in_port(dst_port: str, n_inputs: int) -> int:
-    m = re.match(r"^IN(\d+)_LOGIC$", dst_port)
-    if not m:
+    pk = parse_port_key(dst_port)
+    if pk is None or pk.direction != "IN" or pk.unit != "LOGIC":
         return 0
-    k = int(m.group(1))
-    return k - (n_inputs - 1) // 2
+    return pk.index - (n_inputs - 1) // 2
 
 
 def _port_index(port_key: str) -> int | None:
-    m = re.match(r"^IN(\d+)_LOGIC$", port_key)
-    if not m:
+    pk = parse_port_key(port_key)
+    if pk is None or pk.direction != "IN" or pk.unit != "LOGIC":
         return None
-    return int(m.group(1))
+    return pk.index
 
 
 def wire_skips_auto_reroute(xdata: dict) -> bool:

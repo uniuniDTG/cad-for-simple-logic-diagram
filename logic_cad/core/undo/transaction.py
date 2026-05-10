@@ -5,7 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from logic_cad.core.undo.entity_serialize import snapshot_graphic_entities
-from logic_cad.core.undo.history import DocumentDelta, EntitySnapshot, make_entity_snapshot
+from logic_cad.core.undo.history import (
+    DocumentDelta,
+    EntitySnapshot,
+    apply_delta,
+    make_entity_snapshot,
+)
 
 
 def _payload_equal(a: dict[str, Any], b: dict[str, Any]) -> bool:
@@ -123,7 +128,6 @@ class DocumentTransaction:
     def rollback(self) -> None:
         if self._before is None or self._rolled_back:
             return
-        from logic_cad.core.undo.history import apply_delta
 
         after = snapshot_graphic_entities(self._diagram.doc)
         delta = compute_delta(

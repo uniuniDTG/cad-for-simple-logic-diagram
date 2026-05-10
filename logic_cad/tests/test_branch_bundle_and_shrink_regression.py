@@ -16,9 +16,9 @@ def test_gate_input_bundle_includes_wires_from_wire_branch():
     with d.begin("br"):
         hub = d.place_wire_branch((28.0, 12.0))
     with d.begin("w"):
-        d.connect_ports(driver, "OUT0_LOGIC", hub, "IN0_MULTI")
-        leg0 = d.connect_ports(hub, "OUT0_MULTI", gate, "IN0_LOGIC")
-        leg1 = d.connect_ports(hub, "OUT0_MULTI", gate, "IN1_LOGIC")
+        d.connect_ports(driver, "OUT0_LOGIC", hub, "INOUT0_MULTI")
+        leg0 = d.connect_ports(hub, "INOUT0_MULTI", gate, "IN0_LOGIC")
+        leg1 = d.connect_ports(hub, "INOUT0_MULTI", gate, "IN1_LOGIC")
     d.rebuild_index()
     all_rows = d.wires._gate_input_rows_all(layout, gate)
     bundle_rows = d.wires._gate_input_rows(layout, gate)
@@ -37,9 +37,9 @@ def test_optimize_gate_ports_with_wire_branch_fanin():
     d.rebuild_index()
     hub = d.place_wire_branch((28.0, 12.0))
     with d.begin("w"):
-        d.connect_ports(driver, "OUT0_LOGIC", hub, "IN0_MULTI")
-        leg_uid = d.connect_ports(hub, "OUT0_MULTI", gate, "IN1_LOGIC")
-        trunk_uid = d.connect_ports(hub, "OUT0_MULTI", gate, "IN0_LOGIC")
+        d.connect_ports(driver, "OUT0_LOGIC", hub, "INOUT0_MULTI")
+        leg_uid = d.connect_ports(hub, "INOUT0_MULTI", gate, "IN1_LOGIC")
+        trunk_uid = d.connect_ports(hub, "INOUT0_MULTI", gate, "IN0_LOGIC")
     d.rebuild_index()
     assert d.optimize_and_or_input_ports(gate)
     d.rebuild_index()
@@ -59,9 +59,9 @@ def test_delete_middle_input_shrink_keeps_branch_leg_dst_port():
     d.rebuild_index()
     hub = d.place_wire_branch((28.0, 18.0))
     with d.begin("w0"):
-        d.connect_ports(driver, "OUT0_LOGIC", hub, "IN0_MULTI")
-        leg_uid = d.connect_ports(hub, "OUT0_MULTI", gate, "IN1_LOGIC")
-        d.connect_ports(hub, "OUT0_MULTI", gate, "IN0_LOGIC")
+        d.connect_ports(driver, "OUT0_LOGIC", hub, "INOUT0_MULTI")
+        leg_uid = d.connect_ports(hub, "INOUT0_MULTI", gate, "IN1_LOGIC")
+        d.connect_ports(hub, "INOUT0_MULTI", gate, "IN0_LOGIC")
     d.rebuild_index()
     leg_port = ld_app_dict_for_uid(d.doc, leg_uid).get("dst_port")
     assert leg_port in ("IN0_LOGIC", "IN1_LOGIC")

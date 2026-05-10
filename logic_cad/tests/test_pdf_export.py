@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import ezdxf
+import matplotlib.pyplot as plt
 import pytest
+from ezdxf.addons.drawing.config import BackgroundPolicy, ColorPolicy, Configuration
+from ezdxf.addons.drawing.matplotlib import MatplotlibBackend
+from ezdxf.addons.drawing.properties import Properties, RenderContext
 
+from logic_cad.core.logic_diagram import LogicDiagram
 from logic_cad.core.model.constants import (
     A4_LANDSCAPE_HEIGHT_MM,
     A4_LANDSCAPE_WIDTH_MM,
@@ -17,20 +23,21 @@ from logic_cad.core.model.constants import (
     LAYER_PORT,
     LAYER_USER_LINE_DASHED,
     LAYER_VPORT,
+    TARGET_LAYOUT_XDATA,
 )
-from logic_cad.core.logic_diagram import LogicDiagram
-from ezdxf.addons.drawing.config import BackgroundPolicy, ColorPolicy, Configuration
-from logic_cad.core.undo.history import find_entity_by_uid
-
+from logic_cad.core.model.xdata import build_ld_app_tags, ensure_regapp, set_entity_xdata
+from logic_cad.core.services.layout_service import LayoutService
 from logic_cad.core.services.pdf_export_service import (
     PdfExportCancelled,
     PdfExportOptions,
     _PdfExportFrontend,
+    _decoded_text_entity_for_pdf,
     _paper_size_inches_from_layout,
     configuration_for_pdf_export,
     export_paper_layouts_to_pdf,
     pdf_export_entity_filter,
 )
+from logic_cad.core.undo.history import find_entity_by_uid
 
 
 def _mock_graphic(layer: str) -> MagicMock:
@@ -236,6 +243,77 @@ def test_export_pdf_keeps_user_line_linetype_and_layer() -> None:
     assert str(after.dxf.linetype).upper() == "DASHED"
 
 
+def test_pdf_frontend_draw_hatch_pattern_skips_when_pattern_lines_is_none() -> None:
+    """Regression: ezdxf base uses len(pattern.lines) without a None guard; PDF must not crash."""
+    doc = ezdxf.new("R2010", setup=["styles"])
+    ctx = RenderContext(doc)
+    fig, ax = plt.subplots()
+    try:
+        backend = MatplotlibBackend(ax, adjust_figure=False)
+        fe = _PdfExportFrontend(ctx, backend, Configuration())
+        poly = MagicMock()
+        poly.pattern = MagicMock()
+        poly.pattern.lines = None
+        fe.draw_hatch_pattern(poly, [], Properties())
+    finally:
+        plt.close(fig)
+
+
+def test_export_pdf_page_ref_invisible_sym_writes_file() -> None:
+    """DXF keeps SYM invisible for plot; PDF pipeline must still render (clone unhide)."""
+    doc = ezdxf.new("R2010", setup=["styles"])
+    ensure_regapp(doc)
+    blk = doc.blocks.new("PAGE_FROM")
+    blk.add_attdef("SYM", (0.0, 0.0), "x", dxfattribs={"height": 2.5})
+    layout = doc.layouts.get("Layout1")
+    ins = layout.add_blockref("PAGE_FROM", (40.0, 40.0))
+    set_entity_xdata(
+        ins,
+        build_ld_app_tags("1", "uid-pr", "PAGE_REF", {TARGET_LAYOUT_XDATA: "2"}),
+    )
+    ins.add_attrib("SYM", "A", (0.0, 0.0), dxfattribs={"invisible": 1, "height": 2.5})
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        export_paper_layouts_to_pdf(
+            doc,
+            path,
+            layout_names=["Layout1"],
+            dpi=72,
+        )
+        assert os.path.isfile(path)
+        assert os.path.getsize(path) > 0
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_export_symbol_library_pdf_nonzero_size() -> None:
+    """Regression: bundled symbol library must export without matplotlib text crashes."""
+    sym = Path(__file__).resolve().parent.parent / "assets" / "symbol_library.dxf"
+    if not sym.is_file():
+        pytest.skip("symbol_library.dxf not present")
+    doc = ezdxf.readfile(str(sym))
+    names = LayoutService(doc).list_pages()
+    fd, path = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        export_paper_layouts_to_pdf(
+            doc,
+            path,
+            layout_names=names,
+            dpi=72,
+        )
+        assert os.path.getsize(path) > 0
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def test_pdf_frontend_decodes_dxf_unicode_without_mutating_source() -> None:
     """PDF frontend decodes \\U+xxxx text on cloned entities only."""
 
@@ -246,9 +324,9 @@ def test_pdf_frontend_decodes_dxf_unicode_without_mutating_source() -> None:
     blk = doc.blocks.new("B")
     attdef = blk.add_attdef(r"\U+3042TAG", (0.0, 0.0), "v", height=2.5)
 
-    decoded_txt = _PdfExportFrontend._decoded_text_entity(txt)
-    decoded_mtx = _PdfExportFrontend._decoded_text_entity(mtx)
-    decoded_attdef = _PdfExportFrontend._decoded_text_entity(attdef)
+    decoded_txt = _decoded_text_entity_for_pdf(txt)
+    decoded_mtx = _decoded_text_entity_for_pdf(mtx)
+    decoded_attdef = _decoded_text_entity_for_pdf(attdef)
 
     assert decoded_txt is not txt
     assert decoded_mtx is not mtx
@@ -259,3 +337,24 @@ def test_pdf_frontend_decodes_dxf_unicode_without_mutating_source() -> None:
     assert str(txt.dxf.text) == r"\U+3042"
     assert str(mtx.text) == r"\U+3042\Pnext"
     assert str(attdef.dxf.tag) == r"\U+3042TAG"
+
+
+def test_decoded_text_entity_for_pdf_unhides_page_ref_sym_on_clone() -> None:
+    """PAGE_REF parent + invisible SYM attrib: PDF clone must set invisible=0; source unchanged."""
+    doc = ezdxf.new("R2010", setup=["styles"])
+    ensure_regapp(doc)
+    blk = doc.blocks.new("PAGE_FROM")
+    blk.add_attdef("SYM", (0.0, 0.0), "x", dxfattribs={"height": 2.5})
+    layout = doc.layouts.get("Layout1")
+    ins = layout.add_blockref("PAGE_FROM", (10.0, 10.0))
+    set_entity_xdata(
+        ins,
+        build_ld_app_tags("1", "uid-x", "PAGE_REF", {TARGET_LAYOUT_XDATA: "9"}),
+    )
+    ins.add_attrib("SYM", "Z", (0.0, 0.0), dxfattribs={"invisible": 1})
+    src = next(a for a in ins.attribs if str(a.dxf.tag).upper() == "SYM")
+    assert int(src.dxf.invisible) == 1
+    cloned = _decoded_text_entity_for_pdf(src, parent_insert=ins)
+    assert cloned is not src
+    assert int(cloned.dxf.invisible) == 0
+    assert int(src.dxf.invisible) == 1

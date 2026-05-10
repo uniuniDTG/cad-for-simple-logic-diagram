@@ -109,11 +109,11 @@ def test_delete_wire_branch_insert_shrinks_gate():
     with d.begin("br"):
         hub = d.place_wire_branch((18.0, 10.0))
     with d.begin("w"):
-        d.connect_ports(a, "OUT0_LOGIC", hub, "IN0_MULTI")
-        d.connect_ports(hub, "OUT0_MULTI", b, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", hub, "INOUT0_MULTI")
+        d.connect_ports(hub, "INOUT0_MULTI", b, "IN0_LOGIC")
         d.connect_ports(s0, "OUT0_LOGIC", g, "IN0_LOGIC")
         d.connect_ports(s1, "OUT0_LOGIC", g, "IN1_LOGIC")
-        d.connect_ports(hub, "OUT0_MULTI", g, "IN2_LOGIC")
+        d.connect_ports(hub, "INOUT0_MULTI", g, "IN2_LOGIC")
     d.rebuild_index()
     assert and_or_gate_input_count_for_symbol_uid(d, g) == 3
     with d.begin("del"):
@@ -135,11 +135,11 @@ def test_delete_feeder_wire_to_branch_shrinks_gate():
     with d.begin("br"):
         hub = d.place_wire_branch((18.0, 10.0))
     with d.begin("w"):
-        d.connect_ports(a, "OUT0_LOGIC", hub, "IN0_MULTI")
-        d.connect_ports(hub, "OUT0_MULTI", b, "IN0_LOGIC")
+        d.connect_ports(a, "OUT0_LOGIC", hub, "INOUT0_MULTI")
+        d.connect_ports(hub, "INOUT0_MULTI", b, "IN0_LOGIC")
         d.connect_ports(s0, "OUT0_LOGIC", g, "IN0_LOGIC")
         d.connect_ports(s1, "OUT0_LOGIC", g, "IN2_LOGIC")
-        w_hub_leg = d.connect_ports(hub, "OUT0_MULTI", g, "IN1_LOGIC")
+        w_hub_leg = d.connect_ports(hub, "INOUT0_MULTI", g, "IN1_LOGIC")
     d.rebuild_index()
     assert and_or_gate_input_count_for_symbol_uid(d, g) == 3
     with d.begin("del"):

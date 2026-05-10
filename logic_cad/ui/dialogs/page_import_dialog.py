@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QHeaderView,
     QLabel,
@@ -17,13 +15,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QTableWidget,
     QTableWidgetItem,
-    QVBoxLayout,
 )
 
 from logic_cad.core.dxf.dxf_repository import readfile
 from logic_cad.core.pages.page_layout_meta import read_page_meta
 from logic_cad.core.pages.page_order import is_toc_layout_name, validate_paper_layout_name
 from logic_cad.core.services.layout_service import LayoutService
+from logic_cad.ui.dialog_helpers import (
+    create_ok_cancel_dialog,
+    dialog_exec_accepted,
+)
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -62,10 +63,8 @@ def run_page_import_dialog(win: "MainWindow") -> None:
         )
         return
 
-    dlg = QDialog(win)
-    dlg.setWindowTitle(f"ページ取り込み — {fd_path}")
+    dlg, vb, buttons = create_ok_cancel_dialog(win, f"ページ取り込み — {fd_path}")
 
-    vb = QVBoxLayout(dlg)
     vb.addWidget(QLabel(Path(fd_path).name))
     tbl = QTableWidget(len(importable), 3)
     tbl.setHorizontalHeaderLabels(["取り込む", "ソースレイアウト", "取り込み先レイアウト名"])
@@ -103,14 +102,9 @@ def run_page_import_dialog(win: "MainWindow") -> None:
         tbl.setCellWidget(row, 2, le)
 
     vb.addWidget(tbl)
-    buttons = QDialogButtonBox(
-        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-    )
-    buttons.accepted.connect(dlg.accept)
-    buttons.rejected.connect(dlg.reject)
     vb.addWidget(buttons)
 
-    if dlg.exec() != QDialog.DialogCode.Accepted:
+    if not dialog_exec_accepted(dlg):
         return
 
     migrations: list[tuple[str, str]] = []

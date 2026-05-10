@@ -37,9 +37,14 @@ from logic_cad.core.services.block_edit_helpers import (
     make_port_layer_name,
     rename_block_definition,
 )
+from logic_cad.core.dxf.attrib_geometry_sync import sync_insert_attrib_geometry_for_block_name
 from logic_cad.core.services.block_edit_session import BlockEditSession
-from logic_cad.core.services.layout_service import list_palette_block_names
+from logic_cad.core.services.layout_service import list_block_editor_block_names
 
+from logic_cad.ui.exclusive_tool_buttons import (
+    set_buttons_checked_silently,
+    uncheck_buttons_except,
+)
 from logic_cad.ui.panels.block_sketch_tool_buttons import create_block_annotation_sketch_buttons
 from logic_cad.ui.sketch_tool_icons import block_port_icon
 from logic_cad.ui.symbol_block_editor import SymbolBlockEditScene
@@ -106,7 +111,9 @@ class BlockEditPanel(QWidget):
         row.addWidget(self._btn_tool_port)
         row.addWidget(self._ann_sk.line)
         row.addWidget(self._ann_sk.circle)
+        row.addWidget(self._ann_sk.arc)
         row.addWidget(self._ann_sk.text)
+        row.addWidget(self._ann_sk.plain_text)
         self._chk_show_aux_grid = QCheckBox("補助スナップ", fr)
         self._chk_show_aux_grid.setChecked(False)
         self._refresh_aux_grid_tooltip()
@@ -131,12 +138,16 @@ class BlockEditPanel(QWidget):
             self._btn_tool_port,
             self._ann_sk.line,
             self._ann_sk.circle,
+            self._ann_sk.arc,
             self._ann_sk.text,
+            self._ann_sk.plain_text,
         )
         self._btn_tool_port.toggled.connect(self._on_port_toggled)
         self._ann_sk.line.toggled.connect(self._on_sk_line_toggled)
         self._ann_sk.circle.toggled.connect(self._on_sk_circle_toggled)
+        self._ann_sk.arc.toggled.connect(self._on_sk_arc_toggled)
         self._ann_sk.text.toggled.connect(self._on_sk_attdef_toggled)
+        self._ann_sk.plain_text.toggled.connect(self._on_sk_plain_text_toggled)
         return fr
 
     def tools_widget(self) -> QWidget:
@@ -234,12 +245,17 @@ class BlockEditPanel(QWidget):
         self._ann_sk.line.setToolTip(
             "直線（USER_LINE）: 2点で描画。グリッドにスナップ。Shiftで水平/垂直。レイヤは LD_SYMBOL。\n"
             "配置ツール中はクリックが配置優先（下に図形があっても同じ）。プレビュー中の右クリックで1点目キャンセル。\n"
-            f"次の注釈の線種（直線・円の両方）: {label}（{lt}）。このボタンを右クリックで線種を変更。"
+            f"次の注釈の線種（直線・円・円弧のいずれも）: {label}（{lt}）。このボタンを右クリックで線種を変更。"
         )
         self._ann_sk.circle.setToolTip(
             "円（USER_CIRCLE）: 1点目で中心、2点目で半径。グリッドスナップ。レイヤ LD_SYMBOL。\n"
             "配置ツール中はクリックが配置優先。右クリックでキャンセル。\n"
             f"線種は直線ツールと共通（{label} / {lt}）。直線アイコンボタンを右クリックで変更。"
+        )
+        self._ann_sk.arc.setToolTip(
+            "円弧（USER_ARC）: 開始→弧上→終了の3点。グリッドスナップ。レイヤ LD_SYMBOL。\n"
+            "1→2点の間は破線、2点目以降は弧のラバーバンドでプレビュー。右クリックでやり直し。線種は直線・円と共通（"
+            f"{label} / {lt}）。直線ボタンを右クリックで変更。"
         )
 
     def _on_block_sk_line_linetype_menu(self, pos) -> None:
@@ -261,17 +277,12 @@ class BlockEditPanel(QWidget):
             self._refresh_block_sk_line_button_tooltip()
 
     def _uncheck_other_placement(self, keep: QPushButton) -> None:
-        for b in self._placement_buttons:
-            if b is not keep:
-                b.blockSignals(True)
-                b.setChecked(False)
-                b.blockSignals(False)
+        """Leave ``keep`` as-is; clear other placement toggles without signal noise."""
+        uncheck_buttons_except(self._placement_buttons, keep)
 
     def clear_placement_tools(self) -> None:
-        for b in self._placement_buttons:
-            b.blockSignals(True)
-            b.setChecked(False)
-            b.blockSignals(False)
+        """Reset every placement/sketch tool button; clear scene placement mode."""
+        set_buttons_checked_silently(self._placement_buttons, False)
         if self._scene is not None:
             self._scene.set_placement_tool(None)
 
@@ -305,12 +316,30 @@ class BlockEditPanel(QWidget):
         else:
             self._scene.set_placement_tool(None)
 
+    def _on_sk_arc_toggled(self, checked: bool) -> None:
+        if self._scene is None:
+            return
+        if checked:
+            self._uncheck_other_placement(self._ann_sk.arc)
+            self._scene.set_placement_tool("arc")
+        else:
+            self._scene.set_placement_tool(None)
+
     def _on_sk_attdef_toggled(self, checked: bool) -> None:
         if self._scene is None:
             return
         if checked:
             self._uncheck_other_placement(self._ann_sk.text)
             self._scene.set_placement_tool("attdef")
+        else:
+            self._scene.set_placement_tool(None)
+
+    def _on_sk_plain_text_toggled(self, checked: bool) -> None:
+        if self._scene is None:
+            return
+        if checked:
+            self._uncheck_other_placement(self._ann_sk.plain_text)
+            self._scene.set_placement_tool("dxf_text")
         else:
             self._scene.set_placement_tool(None)
 
@@ -411,7 +440,7 @@ class BlockEditPanel(QWidget):
         self._list.blockSignals(True)
         self._list.clear()
         doc = self._get_diagram().doc
-        for name in list_palette_block_names(doc):
+        for name in list_block_editor_block_names(doc):
             self._list.addItem(name)
         if cur:
             for i in range(self._list.count()):
@@ -457,6 +486,7 @@ class BlockEditPanel(QWidget):
         diagram = self._get_diagram()
         name = self._session.block_name
         self._session.apply_to(diagram)
+        sync_insert_attrib_geometry_for_block_name(diagram.doc, name)
         self._session.clear_history()
         self._session = None
         self._clear_placement_tools()

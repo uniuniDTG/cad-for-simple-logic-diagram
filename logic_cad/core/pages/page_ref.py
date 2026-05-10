@@ -6,6 +6,7 @@ from collections import defaultdict
 
 from ezdxf.document import Drawing
 
+from logic_cad.core.dxf.attrib_geometry_sync import dxfattribs_for_attrib_from_attdef
 from logic_cad.core.model.constants import (
     PAGE_REF_RANK_XDATA,
     PAGE_REF_SHOW_PAGE_DESC_XDATA,
@@ -15,8 +16,10 @@ from logic_cad.core.model.constants import (
     TARGET_LAYOUT_XDATA,
 )
 from logic_cad.core.model.xdata import build_ld_app_tags, get_type, get_uid, read_ld_app_dict, set_entity_xdata
-from logic_cad.core.pages.page_labels import page_index_to_letters, page_ref_link_label
+from logic_cad.core.paper_layout_access import paper_layout_block
+from logic_cad.core.pages.insert_geom_sort import insert_geom_sort_tuple
 from logic_cad.core.pages.page_layout_meta import read_page_meta
+from logic_cad.core.pages.page_labels import page_index_to_letters, page_ref_link_label
 from logic_cad.core.pages.page_order import is_toc_layout_name, list_paper_layout_names_sorted
 
 
@@ -31,7 +34,7 @@ def count_page_refs_to_target(
     layout = doc.layouts.get(source_layout)
     if layout.is_modelspace:
         return 0
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, source_layout)
     n = 0
     for e in blk:
         if e.dxftype() != "INSERT":
@@ -60,7 +63,7 @@ def _parse_page_ref_rank(d: dict[str, str]) -> int | None:
 
 def _geom_tuple(ent) -> tuple[float, float, str]:
     """Tiebreaker within PAGE_REF ordering (matches historical behavior)."""
-    return (-float(ent.dxf.insert.y), float(ent.dxf.insert.x), str(ent.dxf.handle))
+    return insert_geom_sort_tuple(ent)
 
 
 def page_ref_sort_key(ent, xd: dict[str, str]) -> tuple:
@@ -102,7 +105,7 @@ def page_ref_target_layouts_on_sheet(doc: Drawing, layout_name: str) -> list[str
     layout = doc.layouts.get(layout_name)
     if layout.is_modelspace:
         return []
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
     seen: set[str] = set()
     for e in blk:
         if e.dxftype() != "INSERT" or get_type(e) != "PAGE_REF":
@@ -119,7 +122,7 @@ def page_ref_ordinal_for_uid(doc: Drawing, layout_name: str, uid: str) -> int | 
     layout = doc.layouts.get(layout_name)
     if layout.is_modelspace:
         return None
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
     target = ""
     ref_ins = None
     for e in blk:
@@ -157,7 +160,7 @@ def page_link_picker_label(
         cur_u = exclude_uid.strip()
         if cur_u:
             cur_tgt = ""
-            blk0 = doc.blocks.get(doc.layouts.get(source_layout).block_record_name)
+            blk0 = paper_layout_block(doc, source_layout)
             for e in blk0:
                 if e.dxftype() != "INSERT" or get_type(e) != "PAGE_REF":
                     continue
@@ -207,7 +210,7 @@ def corridor_slots_used_for_placement(doc: Drawing, layout_a: str, layout_b: str
         layout = doc.layouts.get(ln)
         if layout.is_modelspace:
             continue
-        blk = doc.blocks.get(layout.block_record_name)
+        blk = paper_layout_block(doc, ln)
         ents = sorted_page_refs_by_target(blk, tgt)
         pessimistic_union |= set(range(len(ents)))
         for ent in ents:
@@ -233,16 +236,19 @@ def vacant_page_ref_sym_ordinals(
 def page_ref_stored_rank(doc: Drawing, layout_name: str, uid: str) -> int | None:
     """Persisted ``PAGE_REF_RANK_XDATA`` for *uid* on *layout_name*, if any."""
     layout = doc.layouts.get(layout_name)
-    if layout.is_modelspace:
+    if layout is None or layout.is_modelspace:
         return None
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
+    if blk is None:
+        return None
+    uid_s = str(uid or "").strip()
     for e in blk:
         if e.dxftype() != "INSERT" or get_type(e) != "PAGE_REF":
             continue
         d = read_ld_app_dict(e)
-        if str(d.get("uid") or get_uid(e) or "") != uid:
-            continue
-        return _parse_page_ref_rank(d)
+        u = str(d.get("uid") or get_uid(e) or "")
+        if u == uid_s:
+            return _parse_page_ref_rank(d)
     return None
 
 
@@ -293,9 +299,8 @@ def _upsert_insert_attrib_from_attdef(ins, doc: Drawing, tag: str, text: str, *,
             a.dxf.invisible = inv
             return
     loc = attdef.dxf.insert
-    dxfattribs: dict = {"height": float(getattr(attdef.dxf, "height", 0.25) or 0.25), "invisible": inv}
-    if getattr(attdef.dxf, "rotation", None) is not None:
-        dxfattribs["rotation"] = float(attdef.dxf.rotation)
+    dxfattribs = dxfattribs_for_attrib_from_attdef(attdef)
+    dxfattribs["invisible"] = inv
     ins.add_attrib(str(attdef.dxf.tag), text, (float(loc.x), float(loc.y)), dxfattribs=dxfattribs)
 
 
@@ -308,7 +313,7 @@ def refresh_page_ref_syms_on_layout(doc: Drawing, layout_name: str) -> None:
     layout = doc.layouts.get(layout_name)
     if layout.is_modelspace:
         return
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
     groups: dict[str, list] = defaultdict(list)
     for e in blk:
         if e.dxftype() != "INSERT":
@@ -340,7 +345,7 @@ def refresh_page_ref_syms_on_layout(doc: Drawing, layout_name: str) -> None:
             extra["sym"] = sym
             tags = build_ld_app_tags("1", uid_str, "PAGE_REF", extra)
             set_entity_xdata(ent, tags)
-            _upsert_insert_attrib_from_attdef(ent, doc, "SYM", sym, visible=False)
+            _upsert_insert_attrib_from_attdef(ent, doc, "SYM", sym, visible=True)
             legacy_show = _is_on(str(extra.get(PAGE_REF_SHOW_TARGET_INFO_XDATA) or "0"))
             show_page_name = legacy_show or _is_on(str(extra.get(PAGE_REF_SHOW_PAGE_NAME_XDATA) or "0"))
             show_page_desc = legacy_show or _is_on(str(extra.get(PAGE_REF_SHOW_PAGE_DESC_XDATA) or "0"))
@@ -422,7 +427,7 @@ def apply_ordered_page_ref_ranks_with_peers(
     layout_s = doc.layouts.get(layout_src)
     if layout_s.is_modelspace:
         return
-    blk_src = doc.blocks.get(layout_s.block_record_name)
+    blk_src = paper_layout_block(doc, layout_src)
     ents = sorted_page_refs_by_target(blk_src, target_dst)
     present = []
     for e in ents:
@@ -599,7 +604,7 @@ def reconnect_page_ref_peers_after_foreign_import(
         layout = doc.layouts.get(layout_here)
         if layout.is_modelspace:
             continue
-        blk = doc.blocks.get(layout.block_record_name)
+        blk = paper_layout_block(doc, layout_here)
         for ent in list(blk):
             if ent.dxftype() != "INSERT" or get_type(ent) != "PAGE_REF":
                 continue
@@ -618,8 +623,7 @@ def reconnect_page_ref_peers_after_foreign_import(
             if not l_tgt or not page_layout_target_is_usable(doc, l_tgt):
                 continue
 
-            tgt_layout_obj = doc.layouts.get(l_tgt)
-            blk_tgt = doc.blocks.get(tgt_layout_obj.block_record_name)
+            blk_tgt = paper_layout_block(doc, l_tgt)
 
             candidates: list[tuple[str, dict[str, str], object]] = []
             for cand in blk_tgt:

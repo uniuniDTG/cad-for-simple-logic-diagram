@@ -1,6 +1,9 @@
 """Layout rename updates PAGE_REF targets."""
 
 from logic_cad.core.model.constants import (
+    BLOCK_PAGE_FROM,
+    PAGE_LINK_HEIGHT_MM,
+    PAGE_LINK_WIDTH_MM,
     PAGE_REF_SHOW_PAGE_DESC_XDATA,
     PAGE_REF_SHOW_PAGE_NAME_XDATA,
     PAGE_REF_SHOW_TARGET_INFO_XDATA,
@@ -80,11 +83,8 @@ def test_two_page_refs_same_target_sym_a_b() -> None:
 
 
 def _add_page_ref_target_attdefs(doc) -> None:
+    """Ensure PAGE_FROM/PAGE_TO blocks include ``PAGE_NAME`` / ``PAGE_DESC`` ATTDEF (built-in or library)."""
     ensure_cross_page_reference_blocks(doc)
-    for block_name in ("PAGE_FROM", "PAGE_TO"):
-        blk = doc.blocks.get(block_name)
-        blk.add_attdef(tag="PAGE_NAME", text="", insert=(0.8, 1.8), height=0.28, dxfattribs={"layer": "LD_TEXT"})
-        blk.add_attdef(tag="PAGE_DESC", text="", insert=(0.8, 1.2), height=0.28, dxfattribs={"layer": "LD_TEXT"})
 
 
 def _attrib(ins, tag: str):
@@ -232,3 +232,59 @@ def test_place_peer_cross_layout_matching_suffix() -> None:
     want_letter = page_index_to_letters(rk)
     assert xf.get("sym") == f"ZPAGE {want_letter}"
     assert xt.get("sym") == f"{first} {want_letter}"
+
+
+def test_degenerate_page_link_metadata_attdef_repair_restores_geometry() -> None:
+    """Origin-stuck ``PAGE_NAME`` ATTDEF is realigned; PAGE_REF ATTRIB geometry follows on ensure.
+
+    Older block definitions may keep ``PAGE_NAME`` / ``PAGE_DESC`` ATTDEF inserts at (0, 0).
+    :func:`ensure_cross_page_reference_blocks` rewrites those ATTDEFs to the built-in layout
+    and runs a one-shot ATTRIB sync for PAGE_REF inserts.
+
+    Note:
+        :meth:`SymbolService.place_page_link` calls ``ensure_cross_page_reference_blocks`` first,
+        so a degenerate ATTDEF must be simulated *after* placement; otherwise it is repaired
+        before ``PAGE_NAME`` ATTRIB creation.
+    """
+    doc = new_document()
+    ensure_cross_page_reference_blocks(doc)
+    w = float(PAGE_LINK_WIDTH_MM)
+    h = float(PAGE_LINK_HEIGHT_MM)
+    exp_x, exp_y = w * 0.10, h * 0.80
+    blk = doc.blocks.get(BLOCK_PAGE_FROM)
+    assert blk is not None
+    names = [L.name for L in doc.layouts if not L.is_modelspace]
+    first = names[0]
+    ls = LayoutService(doc)
+    ls.add_page("B")
+    ss = SymbolService(doc, DynamicGateFactory())
+    uid = ss.place_page_link(first, (12.0, 10.0), "B", ls.list_pages())
+    ins = ss.insert_by_uid(first, uid)
+    assert ins is not None
+    bx, by = float(ins.dxf.insert.x), float(ins.dxf.insert.y)
+    name_attdef = None
+    for ent in blk:
+        if str(ent.dxftype()) == "ATTDEF" and str(ent.dxf.tag).upper() == "PAGE_NAME":
+            name_attdef = ent
+            break
+    assert name_attdef is not None
+    a_name = _attrib(ins, "PAGE_NAME")
+    assert a_name is not None
+    z = float(a_name.dxf.insert.z)
+    name_attdef.dxf.insert = (0.0, 0.0, 0.0)
+    # Degenerate instance: coincident with block insert in WCS (ezdxf may report ATTRIB insert in WCS).
+    a_name.dxf.insert = (bx, by, z)
+
+    ensure_cross_page_reference_blocks(doc)
+
+    ins_att = name_attdef.dxf.insert
+    assert abs(float(ins_att.x) - exp_x) < 1e-6
+    assert abs(float(ins_att.y) - exp_y) < 1e-6
+    ins2 = ss.insert_by_uid(first, uid)
+    assert ins2 is not None
+    a_after = _attrib(ins2, "PAGE_NAME")
+    assert a_after is not None
+    xa, ya = float(a_after.dxf.insert.x), float(a_after.dxf.insert.y)
+    local_ok = abs(xa - exp_x) < 1e-5 and abs(ya - exp_y) < 1e-5
+    wcs_ok = abs(xa - (bx + exp_x)) < 1e-5 and abs(ya - (by + exp_y)) < 1e-5
+    assert local_ok or wcs_ok

@@ -92,16 +92,7 @@ def build_central_widget(win: MainWindow) -> QWidget:
 
     pc_layout.addWidget(_section_sep())
     pc_layout.addWidget(_section_header("注釈（図形）"))
-    sketch_row = QWidget()
-    _sk_lay = QHBoxLayout(sketch_row)
-    _sk_lay.setContentsMargins(0, 0, 0, 0)
-    _sk_lay.setSpacing(4)
-    _sk_lay.addWidget(win._btn_sk_line)
-    _sk_lay.addWidget(win._btn_sk_circle)
-    _sk_lay.addWidget(win._btn_sk_cloud)
-    _sk_lay.addWidget(win._btn_sk_text)
-    _sk_lay.addStretch()
-    pc_layout.addWidget(sketch_row)
+    pc_layout.addWidget(win._sketch_tools_widget)
 
     symbol_block = QWidget()
     _sb_lay = QVBoxLayout(symbol_block)

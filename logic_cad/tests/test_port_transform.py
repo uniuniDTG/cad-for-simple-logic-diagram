@@ -3,14 +3,18 @@
 import ezdxf
 from ezdxf.math import Vec3
 
+from logic_cad.core.dxf.dxf_repository import ensure_standard_layers
 from logic_cad.core.model.index_store import IndexStore
+from logic_cad.core.model.xdata import (
+    build_ld_app_tags,
+    ensure_regapp,
+    new_uid,
+    set_entity_xdata,
+)
 
 
 def test_port_world_after_translation():
     doc = ezdxf.new()
-    from logic_cad.core.dxf.dxf_repository import ensure_standard_layers
-    from logic_cad.core.model.xdata import ensure_regapp
-
     ensure_standard_layers(doc)
     ensure_regapp(doc)
     blk = doc.blocks.new("T")
@@ -19,8 +23,6 @@ def test_port_world_after_translation():
     br = layout.block_record_name
     msp = doc.blocks.get(br)
     ins = msp.add_blockref("T", (10, 20))
-    from logic_cad.core.model.xdata import build_ld_app_tags, new_uid, set_entity_xdata
-
     uid = new_uid()
     set_entity_xdata(ins, build_ld_app_tags("1", uid, "SYMBOL"))
 

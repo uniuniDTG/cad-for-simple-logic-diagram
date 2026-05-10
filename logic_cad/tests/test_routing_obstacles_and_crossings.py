@@ -4,10 +4,12 @@ from dataclasses import replace
 
 import pytest
 
-from logic_cad.core.model.constants import GRID_PITCH
+from logic_cad.core.logic_diagram import LogicDiagram
+from logic_cad.core.model.constants import GRID_PITCH, ROUTING_VERTICAL_LANE_SPACING_MM
 from logic_cad.core.obstacles import wire_obstacles
 from logic_cad.core.routing import (
     DEFAULT_ROUTING_PROFILE,
+    apply_vertical_lane_stagger,
     path_hits_obstacles,
     route_manhattan,
     route_manhattan_with_escape,
@@ -20,8 +22,6 @@ from logic_cad.core.routing.wire_path_metrics import _count_segment_crossings_am
 
 def test_wire_obstacles_skip_wires_whose_endpoints_are_not_in_index():
     """Deleting a gate leaves polylines pointing at a dead dst; they must not act as routing obstacles."""
-    from logic_cad.core.logic_diagram import LogicDiagram
-
     d = LogicDiagram.new()
     with d.begin("place"):
         left0 = d.place_and_gate(1, (20.0, 16.0))
@@ -47,8 +47,6 @@ def test_wire_obstacles_skip_wires_whose_endpoints_are_not_in_index():
 
 def test_wire_obstacles_skip_wires_with_missing_src_or_dst_xdata():
     """Broken xdata must not leave fat segments in the routing obstacle set when index is used."""
-    from logic_cad.core.logic_diagram import LogicDiagram
-
     d = LogicDiagram.new()
     with d.begin("place"):
         a = d.place_and_gate(1, (10.0, 10.0))
@@ -101,10 +99,6 @@ def test_parallel_polylines_no_crossing():
 
 
 def test_apply_vertical_lane_stagger_offsets_longest_interior_vertical():
-    from logic_cad.core.model.constants import ROUTING_VERTICAL_LANE_SPACING_MM
-    from logic_cad.core.model.constants import GRID_PITCH
-    from logic_cad.core.routing import apply_vertical_lane_stagger
-
     pitch = GRID_PITCH
     # Longest interior vertical is (4,0)→(4,12) (first leg p0→p1 is not a candidate).
     x_col = 4.0

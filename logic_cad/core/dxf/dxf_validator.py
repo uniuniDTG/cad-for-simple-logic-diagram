@@ -6,7 +6,15 @@ import re
 from collections import Counter, defaultdict
 from typing import TYPE_CHECKING
 
-from logic_cad.core.model.constants import ALL_LAYERS, APPID, ENTITY_TYPE_WIRE_ARROW, LAYER_VPORT
+from logic_cad.core.model.constants import (
+    ALL_LAYERS,
+    APPID,
+    ENTITY_TYPE_GATE_INPUT_STUB_ARROW,
+    ENTITY_TYPE_WIRE_ARROW,
+    GATE_STUB_ARROW_PARENT_XDATA,
+    LAYER_SYMBOL,
+    LAYER_VPORT,
+)
 from logic_cad.core.model.port_key import parse_port_layer
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
@@ -128,6 +136,37 @@ def validate(doc: Drawing) -> list[str]:
                         if not str(wd.get("wire") or "").strip():
                             issues.append(
                                 f"WIRE_ARROW（ハンドル {e.dxf.handle}）に親 WIRE の wire: が XDATA にありません。"
+                            )
+            if e.dxftype() == "LWPOLYLINE" and str(e.dxf.layer) == LAYER_SYMBOL:
+                gt = get_type(e)
+                if gt == ENTITY_TYPE_GATE_INPUT_STUB_ARROW:
+                    if not get_uid(e):
+                        issues.append(
+                            f"GATE_INPUT_STUB_ARROW（ハンドル {e.dxf.handle}）に uid の XDATA がありません。"
+                        )
+                    else:
+                        gd = read_ld_app_dict(e)
+                        gu = str(gd.get(GATE_STUB_ARROW_PARENT_XDATA) or "").strip()
+                        if not gu:
+                            issues.append(
+                                f"GATE_INPUT_STUB_ARROW（ハンドル {e.dxf.handle}）に親ゲート gate: がありません。"
+                            )
+                            continue
+                        parent_found = False
+                        for ins_cand in blk:
+                            if ins_cand.dxftype() != "INSERT":
+                                continue
+                            if get_uid(ins_cand) == gu:
+                                pt = get_type(ins_cand) or ""
+                                if pt not in ("AND", "OR"):
+                                    issues.append(
+                                        f"GATE_INPUT_STUB_ARROW（ハンドル {e.dxf.handle}）の gate: が AND/OR INSERT を指していません。"
+                                    )
+                                parent_found = True
+                                break
+                        if not parent_found:
+                            issues.append(
+                                f"GATE_INPUT_STUB_ARROW（ハンドル {e.dxf.handle}）の gate: がこのレイアウトに存在しません。"
                             )
 
     return issues

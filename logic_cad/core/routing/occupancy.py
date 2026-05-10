@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from logic_cad.core.geometry.manhattan_metrics import (
+    points_close_xy,
+    segment_is_horizontal,
+    segment_is_vertical,
+)
 from logic_cad.core.routing.polyline import snap_to_grid
 
 # Cardinal step on grid: (dx, dy) in {-1,0,1}^2 \ {(0,0)}
@@ -28,11 +33,11 @@ def _norm_segment_key(
     """Axis-aligned segment key for overlap lookup (world snapped coords)."""
     x0, y0 = snap_to_grid(a[0], a[1], pitch)
     x1, y1 = snap_to_grid(b[0], b[1], pitch)
-    if abs(x0 - x1) < eps and abs(y0 - y1) < eps:
+    if points_close_xy((x0, y0), (x1, y1), eps):
         return None
-    if abs(x0 - x1) < eps:
+    if segment_is_vertical((x0, y0), (x1, y1), eps):
         return ("v", x0, min(y0, y1), max(y0, y1))
-    if abs(y0 - y1) < eps:
+    if segment_is_horizontal((x0, y0), (x1, y1), eps):
         return ("h", y0, min(x0, x1), max(x0, x1))
     return None
 

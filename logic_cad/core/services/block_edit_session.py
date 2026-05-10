@@ -33,6 +33,22 @@ class BlockEditSession:
     def scratch_block(self):
         return self.scratch_doc.blocks.get(self.scratch_block_name or self.block_name)
 
+    def scratch_definition_name(self) -> str:
+        """Name of the block definition inside ``scratch_doc`` (``scratch_block().name``).
+
+        Prefer this for editor UI (ATTDEF tag lists, labels) so choices match the definition
+        actually open in the scratch drawing even if metadata differs.
+        """
+        blk = self.scratch_block()
+        if blk is not None:
+            try:
+                nm = str(blk.name).strip()
+                if nm:
+                    return nm
+            except (AttributeError, TypeError):
+                pass
+        return str(self.block_name or "").strip()
+
     def begin(self, label: str) -> ScratchDocumentTransaction:
         return ScratchDocumentTransaction(
             self.scratch_doc,

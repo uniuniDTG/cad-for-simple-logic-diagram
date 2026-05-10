@@ -326,7 +326,7 @@ python -m logic_cad.app.main
 
 **重要**: ライブラリのブロックを編集する際、**PORT位置（POINTの座標）、ポート数、レイヤ名（`LD_PORT_IN*/OUT*_*`）、シンボル形状**を変更すると、**既存の配線接続がずれたり無効になったり、図形の見た目が変わってしまう**場合があります。変更は最小限に留め、適用後は全関連図面で再読み込みを実行し、**ワイヤの再接続とルーティング確認**を必ず行ってください。
 
-詳細な実装は `logic_cad/core/services/layout_service.py` の `import_symbol_library` / `reload_symbol_library`、および `developer.md` を参照。
+詳細な実装は `logic_cad/core/services/layout_service/`（`layout_symbol_library` 等）の `import_symbol_library` / `reload_symbol_library`、および `developer.md` を参照。
 
 ---
 

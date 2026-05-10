@@ -2,7 +2,7 @@
 
 Serialized payloads use :func:`serialize_entity` / :func:`restore_entity_from_payload`.
 Supported types for v1: LD_PORT POINT, LINE (incl. USER_LINE), CIRCLE (incl. USER_CIRCLE),
-LWPOLYLINE, ARC, ATTDEF. INSERT and other types are skipped on copy.
+LWPOLYLINE, ARC, ATTDEF, TEXT, MTEXT. INSERT and other types are skipped on copy.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import copy
 import json
 from typing import Any
 
-from logic_cad.core.model.constants import ENTITY_TYPE_USER_CIRCLE, ENTITY_TYPE_USER_LINE
+from logic_cad.core.model.constants import ENTITY_TYPE_USER_ARC, ENTITY_TYPE_USER_CIRCLE, ENTITY_TYPE_USER_LINE
 from logic_cad.core.model.port_key import PortKey, format_port_layer, parse_port_layer
 from logic_cad.core.model.xdata import ensure_regapp, new_uid
 from logic_cad.core.services.block_edit_helpers import port_layer_is_taken
@@ -22,7 +22,7 @@ from logic_cad.core.undo.history import find_entity_by_uid
 BLOCK_EDIT_ENTITIES_MIME = "application/x-logic-cad-block-edit-entities"
 _BLOCK_CLIPBOARD_JSON_VERSION = 1
 
-_ALLOWED_COPY_TYPES = frozenset({"POINT", "LINE", "CIRCLE", "LWPOLYLINE", "ARC", "ATTDEF"})
+_ALLOWED_COPY_TYPES = frozenset({"POINT", "LINE", "CIRCLE", "LWPOLYLINE", "ARC", "ATTDEF", "TEXT", "MTEXT"})
 
 
 def _tuple2(v: Any) -> tuple[float, float] | None:
@@ -58,6 +58,10 @@ def _geom_sample_points(payload: dict[str, Any]) -> list[tuple[float, float]]:
         if t:
             out.append(t)
     elif et == "ATTDEF":
+        t = _tuple2(g.get("insert"))
+        if t:
+            out.append(t)
+    elif et in ("TEXT", "MTEXT"):
         t = _tuple2(g.get("insert"))
         if t:
             out.append(t)
@@ -99,6 +103,8 @@ def _offset_payload_geom(payload: dict[str, Any], dx: float, dy: float) -> None:
         off_pt("center")
     elif et == "ATTDEF":
         off_pt("insert")
+    elif et in ("TEXT", "MTEXT"):
+        off_pt("insert")
     elif et == "LWPOLYLINE":
         rows = g.get("points_xyb")
         if isinstance(rows, list):
@@ -117,7 +123,7 @@ def _rewrite_uid_for_user_sketch_payload(payload: dict[str, Any]) -> None:
         if int(code) == 1000 and str(val).startswith("type:"):
             typ = str(val).split(":", 1)[1].strip()
             break
-    if typ not in (ENTITY_TYPE_USER_LINE, ENTITY_TYPE_USER_CIRCLE):
+    if typ not in (ENTITY_TYPE_USER_LINE, ENTITY_TYPE_USER_CIRCLE, ENTITY_TYPE_USER_ARC):
         return
     nu = new_uid()
     new_xd: list[tuple[int, str]] = []

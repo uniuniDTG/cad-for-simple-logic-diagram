@@ -16,6 +16,7 @@ from logic_cad.core.model.cloud_guide_xdata import (
     strip_cloud_pitch_keys,
 )
 from logic_cad.core.model.constants import (
+    ENTITY_TYPE_USER_ARC,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
@@ -27,6 +28,7 @@ from logic_cad.core.model.constants import (
     LINETYPE_CONTINUOUS,
 )
 from logic_cad.core.model.user_sketch_layers import (
+    user_sketch_arc_layer_for_linetype,
     user_sketch_entity_linetype_for_display,
     user_sketch_circle_layer_for_linetype,
     user_sketch_cloud_layer_for_linetype,
@@ -34,14 +36,15 @@ from logic_cad.core.model.user_sketch_layers import (
     user_sketch_line_layer_for_linetype,
 )
 from logic_cad.core.pages.page_order import list_paper_layout_names_sorted
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.routing import snap_to_grid
+from logic_cad.core.services.user_sketch_entity_factory import finalize_new_user_sketch_entity
+from logic_cad.core.symbol_clipboard import UserSketchCopyRecord
 from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
 from logic_cad.core.undo.history import destroy_entity, find_entity_by_uid
-from logic_cad.core.symbol_clipboard import UserSketchCopyRecord
 from logic_cad.core.model.xdata import (
     build_ld_app_tags,
     get_type,
-    new_uid,
     read_ld_app_dict,
     set_entity_xdata,
 )
@@ -294,10 +297,6 @@ class UserGeometryService:
             destroy_entity(self.doc, e)
         return len(to_remove)
 
-    def _layout_block(self, layout_name: str):
-        layout = self.doc.layouts.get(layout_name)
-        return self.doc.blocks.get(layout.block_record_name)
-
     def add_line(
         self,
         layout_name: str,
@@ -305,17 +304,16 @@ class UserGeometryService:
         end: tuple[float, float],
         linetype: str,
     ) -> str:
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ulayer = user_sketch_line_layer_for_linetype(linetype)
         e = blk.add_line(
             start,
             end,
             dxfattribs={"layer": ulayer},
         )
-        e.dxf.linetype = user_sketch_entity_linetype_for_display(linetype)
-        uid = new_uid()
-        set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_LINE, None))
-        return uid
+        return finalize_new_user_sketch_entity(
+            e, ENTITY_TYPE_USER_LINE, sketch_linetype=linetype
+        )
 
     def add_circle(
         self,
@@ -324,17 +322,49 @@ class UserGeometryService:
         radius: float,
         linetype: str,
     ) -> str:
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ulayer = user_sketch_circle_layer_for_linetype(linetype)
         e = blk.add_circle(
             center=center,
             radius=float(radius),
             dxfattribs={"layer": ulayer},
         )
-        e.dxf.linetype = user_sketch_entity_linetype_for_display(linetype)
-        uid = new_uid()
-        set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_CIRCLE, None))
-        return uid
+        return finalize_new_user_sketch_entity(
+            e, ENTITY_TYPE_USER_CIRCLE, sketch_linetype=linetype
+        )
+
+    def add_arc(
+        self,
+        layout_name: str,
+        center: tuple[float, float],
+        radius: float,
+        start_angle_deg: float,
+        end_angle_deg: float,
+        linetype: str,
+    ) -> str:
+        """Add a ``USER_ARC`` (ARC + LD_APP) on the layout block.
+
+        Args:
+            layout_name: Target paper layout name.
+            center: Arc center (mm).
+            radius: Arc radius (mm); must be positive.
+            start_angle_deg: DXF start angle in degrees (CCW from +X).
+            end_angle_deg: DXF end angle in degrees.
+            linetype: Sketch linetype key (CONTINUOUS / CENTER / DASHED family).
+
+        Returns:
+            New entity UID.
+        """
+        blk = paper_layout_block(self.doc, layout_name)
+        ulayer = user_sketch_arc_layer_for_linetype(linetype)
+        e = blk.add_arc(
+            center=(float(center[0]), float(center[1])),
+            radius=max(1e-9, float(radius)),
+            start_angle=float(start_angle_deg),
+            end_angle=float(end_angle_deg),
+            dxfattribs={"layer": ulayer},
+        )
+        return finalize_new_user_sketch_entity(e, ENTITY_TYPE_USER_ARC, sketch_linetype=linetype)
 
     def add_text(
         self,
@@ -343,7 +373,7 @@ class UserGeometryService:
         text: str,
         height: float,
     ) -> str:
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         e = blk.add_text(
             text,
             height=float(height),
@@ -351,9 +381,7 @@ class UserGeometryService:
             dxfattribs={"layer": LAYER_ANNOTATION, "linetype": LINETYPE_CONTINUOUS},
         )
         e.dxf.insert = insert
-        uid = new_uid()
-        set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_TEXT, None))
-        return uid
+        return finalize_new_user_sketch_entity(e, ENTITY_TYPE_USER_TEXT)
 
     def add_cloud(
         self,
@@ -368,7 +396,7 @@ class UserGeometryService:
             raise ValueError("雲マークは2点以上の頂点が必要です。")
         if is_closed and len(vertices) < 3:
             raise ValueError("閉じた雲マークは3点以上の頂点が必要です。")
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ulayer = user_sketch_cloud_layer_for_linetype(linetype)
         seg_len = max(1e-3, float(segment_length))
         if is_closed:
@@ -397,12 +425,14 @@ class UserGeometryService:
                 close=False,
                 dxfattribs={"layer": ulayer},
             )
-        e.dxf.linetype = user_sketch_entity_linetype_for_display(linetype)
-        uid = new_uid()
         guide = [(float(x), float(y)) for x, y in vertices]
         cloud_extra = build_cloud_pitch_xdata_extra(seg_len, guide)
-        set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_CLOUD, cloud_extra))
-        return uid
+        return finalize_new_user_sketch_entity(
+            e,
+            ENTITY_TYPE_USER_CLOUD,
+            sketch_linetype=linetype,
+            ld_extra=cloud_extra,
+        )
 
     def set_user_line_or_circle_linetype(self, layout_name: str, uid: str, linetype: str) -> bool:
         _ = layout_name
@@ -418,6 +448,11 @@ class UserGeometryService:
         if t == ENTITY_TYPE_USER_CIRCLE and e.dxftype() == "CIRCLE":
             lt = str(linetype or LINETYPE_CONTINUOUS).strip() or LINETYPE_CONTINUOUS
             e.dxf.layer = user_sketch_circle_layer_for_linetype(lt)
+            e.dxf.linetype = user_sketch_entity_linetype_for_display(lt)
+            return True
+        if t == ENTITY_TYPE_USER_ARC and e.dxftype() == "ARC":
+            lt = str(linetype or LINETYPE_CONTINUOUS).strip() or LINETYPE_CONTINUOUS
+            e.dxf.layer = user_sketch_arc_layer_for_linetype(lt)
             e.dxf.linetype = user_sketch_entity_linetype_for_display(lt)
             return True
         if t == ENTITY_TYPE_USER_CLOUD and e.dxftype() == "LWPOLYLINE":
@@ -493,6 +528,26 @@ class UserGeometryService:
             return False
         e.dxf.center = (float(center[0]), float(center[1]), 0.0)
         e.dxf.radius = max(1e-9, float(radius))
+        return True
+
+    def set_user_arc_geometry(
+        self,
+        uid: str,
+        center: tuple[float, float],
+        radius: float,
+        start_angle_deg: float,
+        end_angle_deg: float,
+    ) -> bool:
+        """Update ``USER_ARC`` center, radius, and angles (degrees, DXF CCW)."""
+        e = find_entity_by_uid(self.doc, uid)
+        if e is None or e.dxftype() != "ARC":
+            return False
+        if get_type(e) != ENTITY_TYPE_USER_ARC:
+            return False
+        e.dxf.center = (float(center[0]), float(center[1]), 0.0)
+        e.dxf.radius = max(1e-9, float(radius))
+        e.dxf.start_angle = float(start_angle_deg)
+        e.dxf.end_angle = float(end_angle_deg)
         return True
 
     def set_user_text_insert(self, uid: str, insert: tuple[float, float]) -> bool:
@@ -619,6 +674,17 @@ class UserGeometryService:
                 circle_center=(cx, cy),
                 circle_radius=float(e.dxf.radius),
             )
+        if t == ENTITY_TYPE_USER_ARC and e.dxftype() == "ARC":
+            lt = user_sketch_display_linetype_for_entity(e)
+            cx, cy = float(e.dxf.center.x), float(e.dxf.center.y)
+            return UserSketchCopyRecord(
+                entity_type=t,
+                linetype=lt or LINETYPE_CONTINUOUS,
+                arc_center=(cx, cy),
+                arc_radius=float(e.dxf.radius),
+                arc_start_angle_deg=float(e.dxf.start_angle),
+                arc_end_angle_deg=float(e.dxf.end_angle),
+            )
         if t == ENTITY_TYPE_USER_TEXT and e.dxftype() == "TEXT":
             ix, iy = float(e.dxf.insert.x), float(e.dxf.insert.y)
             h = float(getattr(e.dxf, "height", 4.0) or 4.0)
@@ -658,6 +724,16 @@ class UserGeometryService:
             cx, cy = snap_to_grid(rec.circle_center[0] + dx, rec.circle_center[1] + dy)
             r = max(1e-9, float(rec.circle_radius))
             return self.add_circle(layout_name, (cx, cy), r, rec.linetype)
+        if rec.entity_type == ENTITY_TYPE_USER_ARC and rec.arc_center is not None:
+            cx, cy = snap_to_grid(rec.arc_center[0] + dx, rec.arc_center[1] + dy)
+            return self.add_arc(
+                layout_name,
+                (cx, cy),
+                max(1e-9, float(rec.arc_radius)),
+                float(rec.arc_start_angle_deg),
+                float(rec.arc_end_angle_deg),
+                rec.linetype,
+            )
         if rec.entity_type == ENTITY_TYPE_USER_TEXT:
             ix, iy = snap_to_grid(rec.text_insert[0] + dx, rec.text_insert[1] + dy)
             return self.add_text(layout_name, (ix, iy), rec.text, rec.text_height_mm)
@@ -670,7 +746,7 @@ class UserGeometryService:
                 (float(x + shift_x), float(y + shift_y), float(b))
                 for x, y, b in rec.cloud_points_xyb
             ]
-            blk = self._layout_block(layout_name)
+            blk = paper_layout_block(self.doc, layout_name)
             ulayer = user_sketch_cloud_layer_for_linetype(rec.linetype)
             e = blk.add_lwpolyline(
                 shifted_xyb,
@@ -678,15 +754,16 @@ class UserGeometryService:
                 close=bool(rec.cloud_is_closed),
                 dxfattribs={"layer": ulayer},
             )
-            e.dxf.linetype = user_sketch_entity_linetype_for_display(rec.linetype)
-            uid = new_uid()
             gv = rec.cloud_guide_vertices
             pitch = rec.cloud_pitch_mm
+            cloud_extra: dict[str, str] | None = None
             if gv is not None and len(gv) >= 2 and pitch is not None:
                 shifted_guides = [(float(x + shift_x), float(y + shift_y)) for x, y in gv]
                 cloud_extra = build_cloud_pitch_xdata_extra(float(pitch), shifted_guides)
-                set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_CLOUD, cloud_extra))
-            else:
-                set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_CLOUD, None))
-            return uid
+            return finalize_new_user_sketch_entity(
+                e,
+                ENTITY_TYPE_USER_CLOUD,
+                sketch_linetype=rec.linetype,
+                ld_extra=cloud_extra,
+            )
         raise ValueError(f"未対応のユーザー下絵クリップボード種別です: {rec.entity_type!r}")

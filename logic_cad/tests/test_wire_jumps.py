@@ -2,6 +2,8 @@
 
 import math
 
+from ezdxf.math import Vec2, bulge_to_arc
+
 import pytest
 
 from logic_cad.core.model.constants import BRIDGE_RADIUS
@@ -82,8 +84,6 @@ def test_two_jumps_mixed_orient_alternates_bulge_sign() -> None:
 
 
 def test_semijump_bulge_matches_half_circle_geometry() -> None:
-    from ezdxf.math import Vec2, bulge_to_arc
-
     base = [(0.0, 0.0), (0.0, 20.0)]
     xyb = apply_vertical_semijumps_to_xyb(base, [(0.0, 10.0, True)], 0.7)
     b0 = xyb[1][2]
@@ -94,10 +94,6 @@ def test_semijump_bulge_matches_half_circle_geometry() -> None:
 
 def test_negative_bulge_tessellation_ends_at_chord_endpoint() -> None:
     """Match WireItem: swap sa/ea when bulge < 0 so t=1 lands on (x1,y1), not (x0,y0)."""
-    import math
-
-    from ezdxf.math import Vec2, bulge_to_arc
-
     base = [(5.0, 0.0), (5.0, 20.0)]
     xyb = apply_vertical_semijumps_to_xyb(base, [(5.0, 10.0, True)], BRIDGE_RADIUS)
     x0, y0, b0 = xyb[1][0], xyb[1][1], xyb[1][2]

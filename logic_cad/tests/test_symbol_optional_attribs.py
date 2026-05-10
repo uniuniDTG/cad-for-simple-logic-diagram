@@ -2,6 +2,7 @@
 
 from logic_cad.core.attrib_tags import list_editable_text_attdef_tags
 from logic_cad.core.logic_diagram import LogicDiagram
+from logic_cad.core.model.xdata import get_uid
 
 
 def _add_optional_alarm_block(diagram: LogicDiagram, block_name: str) -> None:
@@ -57,8 +58,6 @@ def test_optional_symbol_tags_can_be_missing_without_failing_updates():
 
 def test_move_insert_rebuilds_attribs_preserves_uid_and_values():
     """Regression: move with ATTRIB must keep LD_APP uid and text (BricsCAD round-trip)."""
-    from logic_cad.core.model.xdata import get_uid
-
     d = LogicDiagram.new()
     with d.begin("place-gate"):
         uid = d.place_and_gate(1, (12.0, 14.0))
@@ -77,11 +76,11 @@ def test_move_insert_rebuilds_attribs_preserves_uid_and_values():
 
 
 def test_alarm1_move_preserves_label0_and_editable_tag_values():
-    """Library ALARM1 (ベル): move_insert must keep LABEL*/STATIC_LABEL* set via properties."""
+    """Optional-attrib symbol: move_insert keeps LABEL*/STATIC_LABEL* (formerly library ALARM1)."""
     d = LogicDiagram.new()
-    assert "ALARM1" in d.doc.blocks, "symbol library should define ALARM1"
+    _add_optional_alarm_block(d, "ALARM_MOVE_REGRESSION")
     with d.begin("place-bell"):
-        uid = d.place_symbol("ALARM1", (10.0, 20.0), "BELL_1")
+        uid = d.place_symbol("ALARM_MOVE_REGRESSION", (10.0, 20.0), "BELL_1")
     with d.begin("set-labels"):
         d.set_symbol_attr(uid, "LABEL0", "ZONE-A")
         d.set_symbol_attr(uid, "STATIC_LABEL0", "BELL")

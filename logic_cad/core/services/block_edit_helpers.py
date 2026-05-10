@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import math
 
-from ezdxf.addons import Importer
 from ezdxf.document import Drawing
 
 from logic_cad.core.model.constants import (
+    ENTITY_TYPE_USER_ARC,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_LINE,
     LAYER_SYMBOL,
@@ -16,7 +16,8 @@ from logic_cad.core.model.constants import (
 from logic_cad.core.model.port_key import PortKey, format_port_layer, parse_port_layer
 from logic_cad.core.model.user_sketch_layers import user_sketch_entity_linetype_for_display
 from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
-from logic_cad.core.model.xdata import build_ld_app_tags, get_uid, new_uid, set_entity_xdata, get_type
+from logic_cad.core.model.xdata import get_uid, get_type
+from logic_cad.core.services.user_sketch_entity_factory import finalize_new_user_sketch_entity
 from logic_cad.core.undo.history import find_entity_by_uid
 from logic_cad.core.undo.entity_serialize import restore_entity_from_payload, serialize_entity
 from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, new_document
@@ -64,10 +65,9 @@ def add_user_line_to_block(
         (float(end[0]), float(end[1])),
         dxfattribs={"layer": LAYER_SYMBOL},
     )
-    e.dxf.linetype = user_sketch_entity_linetype_for_display(linetype)
-    uid = new_uid()
-    set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_LINE, None))
-    return uid
+    return finalize_new_user_sketch_entity(
+        e, ENTITY_TYPE_USER_LINE, sketch_linetype=linetype
+    )
 
 
 def add_user_circle_to_block(
@@ -85,10 +85,29 @@ def add_user_circle_to_block(
         radius=r,
         dxfattribs={"layer": LAYER_SYMBOL},
     )
-    e.dxf.linetype = user_sketch_entity_linetype_for_display(linetype)
-    uid = new_uid()
-    set_entity_xdata(e, build_ld_app_tags("1", uid, ENTITY_TYPE_USER_CIRCLE, None))
-    return uid
+    return finalize_new_user_sketch_entity(
+        e, ENTITY_TYPE_USER_CIRCLE, sketch_linetype=linetype
+    )
+
+
+def add_user_arc_to_block(
+    block,
+    center: tuple[float, float],
+    radius: float,
+    start_angle_deg: float,
+    end_angle_deg: float,
+    linetype: str,
+) -> str:
+    """Add a ``USER_ARC`` (ARC + LD_APP) on ``LAYER_SYMBOL``."""
+
+    e = block.add_arc(
+        center=(float(center[0]), float(center[1])),
+        radius=max(float(radius), 1e-9),
+        start_angle=float(start_angle_deg),
+        end_angle=float(end_angle_deg),
+        dxfattribs={"layer": LAYER_SYMBOL},
+    )
+    return finalize_new_user_sketch_entity(e, ENTITY_TYPE_USER_ARC, sketch_linetype=linetype)
 
 
 def add_attdef_to_block(
@@ -100,6 +119,20 @@ def add_attdef_to_block(
     height_mm: float = 2.5,
 ) -> str:
     """Add an ``ATTDEF`` on ``LAYER_TEXT`` (symbol label / attribute definition).
+
+    New definitions get explicit left alignment and ``align_point`` equal to ``insert``
+    so instance ATTRIBs created via ``dxfattribs_for_attrib_from_attdef`` are not
+    missing alignment fields compared to typical CAD exports.
+
+    Args:
+        block: Target block layout (scratch or main).
+        tag: ATTDEF tag string.
+        insert: Insertion point in DXF mm (x, y).
+        default_text: Default attribute string.
+        height_mm: Text cap height in mm.
+
+    Returns:
+        Handle string of the new ``ATTDEF``.
 
     Raises:
         ValueError: If *tag* is already used by another ATTDEF in *block*.
@@ -116,6 +149,10 @@ def add_attdef_to_block(
         height=max(0.25, float(height_mm)),
         dxfattribs={"layer": LAYER_TEXT},
     )
+    ins = e.dxf.insert
+    z = float(getattr(ins, "z", 0.0) or 0.0)
+    e.dxf.halign = 0
+    e.dxf.align_point = (float(ins.x), float(ins.y), z)
     return str(getattr(e.dxf, "handle", "") or "")
 
 
@@ -158,6 +195,9 @@ def set_scratch_user_sketch_linetype(doc: Drawing, uid: str, linetype: str) -> b
         e.dxf.linetype = lt
         return True
     if t == ENTITY_TYPE_USER_CIRCLE and e.dxftype() == "CIRCLE":
+        e.dxf.linetype = lt
+        return True
+    if t == ENTITY_TYPE_USER_ARC and e.dxftype() == "ARC":
         e.dxf.linetype = lt
         return True
     return False
@@ -227,11 +267,137 @@ def update_scratch_attdef_fields(
     ha = int(halign)
     if ha not in (0, 1, 2):
         ha = 0
+    ent.dxf.halign = ha
     lay = normalize_dxf_text_entity(ent)
     ax, ay = float(lay.anchor_x), float(lay.anchor_y)
-    ent.dxf.halign = ha
     ent.dxf.insert = (ax, ay, 0.0)
     ent.dxf.align_point = (ax, ay, 0.0)
+
+
+def add_plain_text_to_block(
+    block,
+    insert: tuple[float, float],
+    text: str,
+    *,
+    height_mm: float = 2.5,
+) -> str:
+    """Add a single-line ``TEXT`` on ``LAYER_TEXT`` (not an ``ATTDEF``).
+
+    Args:
+        block: Target block layout.
+        insert: Insert point in DXF mm.
+        text: Initial string.
+        height_mm: Character cap height in mm.
+
+    Returns:
+        New entity handle string.
+
+    Raises:
+        ValueError: If the block rejects the entity (should not occur for normal text).
+    """
+
+    x, y = float(insert[0]), float(insert[1])
+    e = block.add_text(
+        str(text),
+        height=max(0.25, float(height_mm)),
+        dxfattribs={"layer": LAYER_TEXT},
+    )
+    e.dxf.insert = (x, y, 0.0)
+    e.dxf.align_point = (x, y, 0.0)
+    return str(getattr(e.dxf, "handle", "") or "")
+
+
+def update_scratch_text_fields(
+    block,
+    handle: str,
+    *,
+    text: str,
+    height_mm: float,
+    rotation_deg: float,
+    halign: int,
+) -> None:
+    """Update ``TEXT`` content, size, rotation, and horizontal alignment in a scratch block.
+
+    Args:
+        block: Block containing the ``TEXT``.
+        handle: Entity handle.
+        text: New string.
+        height_mm: Cap height in mm.
+        rotation_deg: Counter-clockwise rotation in degrees (DXF).
+        halign: 0=left, 1=center, 2=right.
+
+    Raises:
+        ValueError: If the handle does not resolve to a ``TEXT`` entity.
+    """
+
+    h = str(handle or "").strip()
+    if not h:
+        raise ValueError("ハンドルが空です。")
+    ent = None
+    for e in block:
+        if str(getattr(e.dxf, "handle", "") or "") == h:
+            ent = e
+            break
+    if ent is None or ent.dxftype() != "TEXT":
+        raise ValueError("TEXT が見つかりません。")
+    ent.dxf.text = str(text)
+    ent.dxf.height = max(0.25, float(height_mm))
+    ent.dxf.rotation = float(rotation_deg)
+    ha = int(halign)
+    if ha not in (0, 1, 2):
+        ha = 0
+    ent.dxf.halign = ha
+    lay = normalize_dxf_text_entity(ent)
+    ax, ay = float(lay.anchor_x), float(lay.anchor_y)
+    ent.dxf.insert = (ax, ay, 0.0)
+    ent.dxf.align_point = (ax, ay, 0.0)
+
+
+def update_scratch_mtext_fields(
+    block,
+    handle: str,
+    *,
+    plain_text: str,
+    char_height_mm: float,
+    rotation_deg: float,
+    width_mm: float,
+    attachment_point: int,
+) -> None:
+    """Update ``MTEXT`` fields on a scratch-block entity (paragraph breaks from newlines).
+
+    Args:
+        block: Block containing the ``MTEXT``.
+        handle: Entity handle.
+        plain_text: User text; ``\\n`` becomes MTEXT paragraph breaks.
+        char_height_mm: Character height in mm.
+        rotation_deg: DXF rotation in degrees.
+        width_mm: Reference rectangle width (0 = unset / single column in ezdxf).
+        attachment_point: DXF attachment point (1–9).
+
+    Raises:
+        ValueError: If the handle does not resolve to ``MTEXT``.
+    """
+
+    h = str(handle or "").strip()
+    if not h:
+        raise ValueError("ハンドルが空です。")
+    ent = None
+    for e in block:
+        if str(getattr(e.dxf, "handle", "") or "") == h:
+            ent = e
+            break
+    if ent is None or ent.dxftype() != "MTEXT":
+        raise ValueError("MTEXT が見つかりません。")
+    body = str(plain_text).replace("\r\n", "\n").replace("\r", "\n")
+    ent.dxf.text = body.replace("\n", "\\P")
+    ent.dxf.char_height = max(0.25, float(char_height_mm))
+    ent.dxf.rotation = float(rotation_deg)
+    ww = float(width_mm)
+    ent.dxf.width = ww if ww > 1e-9 else 0.0
+    ap = int(attachment_point)
+    if ap < 1 or ap > 9:
+        ap = 1
+    ent.dxf.attachment_point = ap
 
 
 def update_scratch_port_layer(block, handle: str, new_layer: str) -> None:
@@ -287,6 +453,28 @@ def update_scratch_user_circle_geometry(
     return True
 
 
+def update_scratch_user_arc_geometry(
+    doc: Drawing,
+    uid: str,
+    center: tuple[float, float],
+    radius: float,
+    start_angle_deg: float,
+    end_angle_deg: float,
+) -> bool:
+    """Move or reshape a ``USER_ARC`` by uid in *doc* (translation updates center only)."""
+
+    e = find_entity_by_uid(doc, uid)
+    if e is None or e.dxftype() != "ARC":
+        return False
+    if get_type(e) != ENTITY_TYPE_USER_ARC:
+        return False
+    e.dxf.center = (float(center[0]), float(center[1]), 0.0)
+    e.dxf.radius = max(1e-9, float(radius))
+    e.dxf.start_angle = float(start_angle_deg)
+    e.dxf.end_angle = float(end_angle_deg)
+    return True
+
+
 def make_port_layer_name(direction: str, index: int, unit: str) -> str:
     """Build normalized ``LD_PORT_*`` layer from UI tokens."""
 
@@ -318,16 +506,96 @@ def count_block_insert_references(doc: Drawing, block_name: str) -> int:
     return total
 
 
+def _collect_blocks_reachable_via_insert(doc: Drawing, root: str) -> frozenset[str]:
+    """Collect block definition names reachable from *root* following INSERT refs.
+
+    Only names present in ``doc.blocks`` are followed. Missing INSERT targets are
+    ignored (same as DXF allowing unresolved refs).
+
+    Args:
+        doc: Source drawing.
+        root: Starting block definition name.
+
+    Returns:
+        Set of block names including *root* when defined; empty if *root* missing.
+    """
+    root_s = str(root).strip()
+    if not root_s or root_s not in doc.blocks:
+        return frozenset()
+    found: set[str] = set()
+    stack = [root_s]
+    while stack:
+        bn = stack.pop()
+        if bn in found:
+            continue
+        blk = doc.blocks.get(bn)
+        if blk is None:
+            continue
+        found.add(bn)
+        for ent in blk:
+            if ent.dxftype() != "INSERT":
+                continue
+            child = str(ent.dxf.name)
+            if child in doc.blocks and child not in found:
+                stack.append(child)
+    return frozenset(found)
+
+
+def copy_block_definitions_tree_from_main_to_scratch(
+    main_doc: Drawing,
+    scratch: Drawing,
+    entry_block_name: str,
+) -> None:
+    """Copy *entry_block_name* and nested INSERT targets into *scratch* with LD_APP XDATA.
+
+    Uses the same ``serialize_entity`` / ``restore_entity_from_payload`` path as
+    :func:`replace_main_block_from_scratch`, avoiding ``ezdxf.addons.Importer`` which
+    strips XDATA (see ezdxf Importer docs).
+
+    Empty block records are created for the full dependency closure before entities
+    are restored so nested ``INSERT`` can resolve.
+
+    Args:
+        main_doc: Document that owns the block definitions.
+        scratch: Minimal target drawing (e.g. from :func:`new_document`).
+        entry_block_name: Block to open for editing (dependencies included).
+
+    Raises:
+        ValueError: If *entry_block_name* is not in *main_doc.blocks*, or if a
+            needed block name already exists in *scratch* (unexpected for BEDIT scratch).
+    """
+    root = str(entry_block_name).strip()
+    if root not in main_doc.blocks:
+        raise ValueError(f"ブロック {root!r} は本体にありません。")
+    needed = _collect_blocks_reachable_via_insert(main_doc, root)
+    if root not in needed:
+        raise ValueError(f"ブロック {root!r} は本体にありません。")
+    for bn in sorted(needed):
+        if bn in scratch.blocks:
+            raise ValueError(
+                f"スクラッチにブロック {bn!r} が既に存在します（複製を中止しました）。"
+            )
+        src_blk = main_doc.blocks.get(bn)
+        nb = scratch.blocks.new(bn)
+        try:
+            nb.base_point = src_blk.base_point
+        except Exception:
+            nb.base_point = (0.0, 0.0, 0.0)
+    for bn in sorted(needed):
+        src_blk = main_doc.blocks.get(bn)
+        for ent in list(src_blk):
+            payload = serialize_entity(main_doc, ent)
+            payload2 = dict(payload)
+            payload2["owner"] = {"kind": "block", "name": bn}
+            restore_entity_from_payload(scratch, payload2)
+
+
 def create_scratch_with_block_from_main(main_doc: Drawing, block_name: str) -> Drawing:
     """New minimal drawing containing a copy of *block_name* from *main_doc*."""
 
     scratch = new_document()
     ensure_standard_layers(scratch)
-    if block_name not in main_doc.blocks:
-        raise ValueError(f"ブロック {block_name!r} は本体にありません。")
-    imp = Importer(main_doc, scratch)
-    imp.import_block(block_name)
-    imp.finalize()
+    copy_block_definitions_tree_from_main_to_scratch(main_doc, scratch, block_name)
     return scratch
 
 
@@ -513,6 +781,31 @@ def _apply_rotate_to_entity(ent, delta_deg: float) -> None:
         if ha not in (3, 5):
             dxfe.rotation = _norm_deg(float(getattr(dxfe, "rotation", 0.0) or 0.0) + float(delta_deg))
         return
+    if dt == "TEXT":
+        dxfe = ent.dxf
+        ins = dxfe.insert
+        ix, iy = float(ins.x), float(ins.y)
+        ri_x, ri_y = _rot_xy(ix, iy, delta_deg)
+        dxfe.insert = (ri_x, ri_y, 0.0)
+        ha = int(getattr(dxfe, "halign", 0) or 0)
+        ap = getattr(dxfe, "align_point", None)
+        if ap is not None and hasattr(ap, "x") and hasattr(ap, "y"):
+            ax, ay = float(ap.x), float(ap.y)
+            rax, ray = _rot_xy(ax, ay, delta_deg)
+            dxfe.align_point = (rax, ray, 0.0)
+        else:
+            dxfe.align_point = (ri_x, ri_y, 0.0)
+        if ha not in (3, 5):
+            dxfe.rotation = _norm_deg(float(getattr(dxfe, "rotation", 0.0) or 0.0) + float(delta_deg))
+        return
+    if dt == "MTEXT":
+        dxfe = ent.dxf
+        ins = dxfe.insert
+        ix, iy = float(ins.x), float(ins.y)
+        ri_x, ri_y = _rot_xy(ix, iy, delta_deg)
+        dxfe.insert = (ri_x, ri_y, 0.0)
+        dxfe.rotation = _norm_deg(float(getattr(dxfe, "rotation", 0.0) or 0.0) + float(delta_deg))
+        return
 
 
 def rotate_scratch_block_entities(
@@ -550,6 +843,9 @@ def rotate_scratch_block_entities(
         elif ent.dxftype() == "CIRCLE" and t == ENTITY_TYPE_USER_CIRCLE:
             _apply_rotate_to_entity(ent, delta_deg)
             rotated_uids.add(uid)
+        elif ent.dxftype() == "ARC" and t == ENTITY_TYPE_USER_ARC:
+            _apply_rotate_to_entity(ent, delta_deg)
+            rotated_uids.add(uid)
 
     for h_in in handles:
         h = str(h_in or "").strip()
@@ -572,6 +868,8 @@ def rotate_scratch_block_entities(
         if dt == "LINE" and get_type(ent) in (ENTITY_TYPE_USER_LINE,):
             continue
         if dt == "CIRCLE" and get_type(ent) in (ENTITY_TYPE_USER_CIRCLE,):
+            continue
+        if dt == "ARC" and get_type(ent) in (ENTITY_TYPE_USER_ARC,):
             continue
 
         _apply_rotate_to_entity(ent, delta_deg)

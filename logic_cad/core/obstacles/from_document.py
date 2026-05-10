@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Iterable
 
+from ezdxf import bbox as dxf_bbox
 from ezdxf.math import Vec2, Vec3, bulge_to_arc
 
 from logic_cad.core.model.constants import (
@@ -19,6 +20,7 @@ from logic_cad.core.model.index_store import IndexStore
 from logic_cad.core.model.port_key import is_input_port_key, is_output_port_key
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.services.dynamic_gate_factory import GateViewGeometry, gate_view_geometry_from_block_name
 
 if TYPE_CHECKING:
@@ -160,8 +162,6 @@ def _symbol_boxes(
     index: IndexStore,
     uid: str,
 ) -> list[tuple[float, float, float, float]]:
-    from ezdxf import bbox as dxf_bbox
-
     boxes: list[tuple[float, float, float, float]] = []
     pts = [p for (pu, _pk), p in index.ports.items() if pu == uid]
     if pts:
@@ -199,8 +199,6 @@ def _symbol_boxes(
 
 def _non_attdef_insert_world_bbox(doc: Drawing, ins) -> tuple[float, float, float, float] | None:
     """WCS AABB from block geometry only (exclude ATTDEF), aligned with UI ``block_scaled_bounds`` geo pass."""
-    from ezdxf import bbox as dxf_bbox
-
     bname = str(ins.dxf.name)
     if bname not in doc.blocks:
         return None
@@ -231,8 +229,6 @@ def _non_attdef_insert_world_bbox(doc: Drawing, ins) -> tuple[float, float, floa
 
 def _virtual_block_world_bbox(ins) -> tuple[float, float, float, float] | None:
     """INSERT exploded to WCS — catches geometry ezdxf.extents([INSERT]) can miss."""
-    from ezdxf import bbox as dxf_bbox
-
     try:
         ve = list(ins.virtual_entities())
         if not ve:
@@ -377,8 +373,7 @@ def wire_obstacles(
     or ``dst`` in xdata, or either INSERT uid absent from the index (orphans after
     symbol delete without deleting wires).
     """
-    layout = doc.layouts.get(layout_name)
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
     paths: list[list[tuple[float, float]]] = []
     excluded = exclude_wire_uids or set()
     for e in blk:

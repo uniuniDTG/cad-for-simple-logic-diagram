@@ -5,6 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from logic_cad.core.geometry.manhattan_metrics import (
+    manhattan_distance,
+    points_close_xy,
+    segment_is_axis_aligned,
+)
 from logic_cad.core.model.constants import GRID_PITCH, ROUTE_ESCAPE_MM
 from logic_cad.core.routing.escape_geometry import ensure_min_escape_distance
 from logic_cad.core.routing.manhattan import collect_fixed_manhattan_polylines
@@ -120,10 +125,6 @@ def _try_ovg_with_context(
     )
 
 
-def _manhattan(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
-
 def build_axis_aligned_first_hops(
     p0: tuple[float, float],
     pitch: float,
@@ -146,10 +147,10 @@ def build_axis_aligned_first_hops(
                 p0s[1] + d[1] * k * pitch,
                 pitch,
             )
-            leg = _manhattan(p0s, fh)
+            leg = manhattan_distance(p0s, fh)
             if leg + 1e-9 < min_first_leg_mm:
                 continue
-            tw_dist = _manhattan(fh, toward) if toward is not None else leg
+            tw_dist = manhattan_distance(fh, toward) if toward is not None else leg
             raw.append((tw_dist, leg, ci, k, fh))
 
     raw.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
@@ -161,11 +162,9 @@ def build_axis_aligned_first_hops(
         s = snap_to_grid(px, py, pitch)
         if s in seen:
             continue
-        if _manhattan(p0s, s) + 1e-9 < min_first_leg_mm:
+        if manhattan_distance(p0s, s) + 1e-9 < min_first_leg_mm:
             continue
-        dx = s[0] - p0s[0]
-        dy = s[1] - p0s[1]
-        if abs(dx) > 1e-9 and abs(dy) > 1e-9:
+        if not segment_is_axis_aligned(p0s, s):
             continue
         seen.add(s)
         out.append(s)
@@ -235,7 +234,7 @@ def _try_fixed_manhattan_escape_phase(
         for t in tails:
             if len(t) < 1:
                 continue
-            if abs(t[0][0] - ex[0]) < 1e-9 and abs(t[0][1] - ex[1]) < 1e-9:
+            if points_close_xy(t[0], ex):
                 full = dedupe_colinear([p0] + t)
             else:
                 full = dedupe_colinear([p0, ex] + t)

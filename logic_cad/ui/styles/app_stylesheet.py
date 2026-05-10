@@ -150,6 +150,7 @@ QWidget#paletteColumn QPushButton#wireToolManual:checked:hover {
 
 QWidget#paletteColumn QPushButton#sketchToolLine,
 QWidget#paletteColumn QPushButton#sketchToolCircle,
+QWidget#paletteColumn QPushButton#sketchToolArc,
 QWidget#paletteColumn QPushButton#sketchToolCloud,
 QWidget#paletteColumn QPushButton#sketchToolText {
     background-color: #2e3138;
@@ -163,6 +164,7 @@ QWidget#paletteColumn QPushButton#sketchToolText {
 }
 QWidget#paletteColumn QPushButton#sketchToolLine:hover,
 QWidget#paletteColumn QPushButton#sketchToolCircle:hover,
+QWidget#paletteColumn QPushButton#sketchToolArc:hover,
 QWidget#paletteColumn QPushButton#sketchToolCloud:hover,
 QWidget#paletteColumn QPushButton#sketchToolText:hover {
     background-color: #343840;
@@ -170,6 +172,7 @@ QWidget#paletteColumn QPushButton#sketchToolText:hover {
 }
 QWidget#paletteColumn QPushButton#sketchToolLine:checked,
 QWidget#paletteColumn QPushButton#sketchToolCircle:checked,
+QWidget#paletteColumn QPushButton#sketchToolArc:checked,
 QWidget#paletteColumn QPushButton#sketchToolCloud:checked,
 QWidget#paletteColumn QPushButton#sketchToolText:checked {
     background-color: #003a52;
@@ -177,6 +180,7 @@ QWidget#paletteColumn QPushButton#sketchToolText:checked {
 }
 QWidget#paletteColumn QPushButton#sketchToolLine:checked:hover,
 QWidget#paletteColumn QPushButton#sketchToolCircle:checked:hover,
+QWidget#paletteColumn QPushButton#sketchToolArc:checked:hover,
 QWidget#paletteColumn QPushButton#sketchToolCloud:checked:hover,
 QWidget#paletteColumn QPushButton#sketchToolText:checked:hover {
     background-color: #00485e;
@@ -185,13 +189,17 @@ QWidget#paletteColumn QPushButton#sketchToolText:checked:hover {
 
 QWidget#blockEditPanel QPushButton#blockSketchToolLine,
 QWidget#blockEditPanel QPushButton#blockSketchToolCircle,
+QWidget#blockEditPanel QPushButton#blockSketchToolArc,
 QWidget#blockEditPanel QPushButton#blockSketchToolText,
 QWidget#blockEditPanel QPushButton#blockSketchToolAttdef,
+QWidget#blockEditPanel QPushButton#blockSketchToolPlainText,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolPort,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolLine,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolArc,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolText,
-QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef {
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPlainText {
     background-color: #2e3138;
     border: 1px solid #383c44;
     border-radius: 0px;
@@ -203,37 +211,49 @@ QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef {
 }
 QWidget#blockEditPanel QPushButton#blockSketchToolLine:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolCircle:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolArc:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolText:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolPlainText:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolArc:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolText:hover,
-QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:hover {
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPlainText:hover {
     background-color: #343840;
     border-color: #4a7a98;
 }
 QWidget#blockEditPanel QPushButton#blockSketchToolLine:checked,
 QWidget#blockEditPanel QPushButton#blockSketchToolCircle:checked,
+QWidget#blockEditPanel QPushButton#blockSketchToolArc:checked,
 QWidget#blockEditPanel QPushButton#blockSketchToolText:checked,
 QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:checked,
+QWidget#blockEditPanel QPushButton#blockSketchToolPlainText:checked,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:checked,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:checked,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolArc:checked,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolText:checked,
-QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked {
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPlainText:checked {
     background-color: #003a52;
     border: 2px solid #00b4e0;
 }
 QWidget#blockEditPanel QPushButton#blockSketchToolLine:checked:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolCircle:checked:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolArc:checked:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolText:checked:hover,
 QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:checked:hover,
+QWidget#blockEditPanel QPushButton#blockSketchToolPlainText:checked:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolPort:checked:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolLine:checked:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolArc:checked:hover,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolText:checked:hover,
-QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked:hover {
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:checked:hover,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPlainText:checked:hover {
     background-color: #00485e;
     border-color: #30c8f0;
 }
@@ -259,9 +279,11 @@ QFrame#blockEditToolsBar QPushButton#blockApplyToMain:pressed {
 QWidget#blockEditPanel QPushButton#blockSketchToolCircle:disabled,
 QWidget#blockEditPanel QPushButton#blockSketchToolText:disabled,
 QWidget#blockEditPanel QPushButton#blockSketchToolAttdef:disabled,
+QWidget#blockEditPanel QPushButton#blockSketchToolPlainText:disabled,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolCircle:disabled,
 QFrame#blockEditToolsBar QPushButton#blockSketchToolText:disabled,
-QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:disabled {
+QFrame#blockEditToolsBar QPushButton#blockSketchToolAttdef:disabled,
+QFrame#blockEditToolsBar QPushButton#blockSketchToolPlainText:disabled {
     background-color: #26282e;
     border-color: #2e3238;
 }

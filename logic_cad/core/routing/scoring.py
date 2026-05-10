@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from logic_cad.core.geometry.manhattan_metrics import (
+    manhattan_distance,
+    points_close_xy,
+    segment_is_horizontal,
+    segment_is_vertical,
+)
 from logic_cad.core.model.constants import (
     ROUTING_SOFT_OBSTACLE_PENALTY,
     ROUTING_TURN_COST,
@@ -12,18 +18,21 @@ from .segment_policy import segment_blocks_hard_and_collinear
 
 
 def path_length(pts: list[tuple[float, float]]) -> float:
-    return sum(abs(pts[i + 1][0] - pts[i][0]) + abs(pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1))
+    return sum(manhattan_distance(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
 
 
 def path_turns(pts: list[tuple[float, float]]) -> int:
     turns = 0
     prev_dir: tuple[int, int] | None = None
     for i in range(len(pts) - 1):
-        dx = pts[i + 1][0] - pts[i][0]
-        dy = pts[i + 1][1] - pts[i][1]
-        if abs(dx) > 1e-9:
+        a, b = pts[i], pts[i + 1]
+        if points_close_xy(a, b):
+            continue
+        dx = b[0] - a[0]
+        dy = b[1] - a[1]
+        if segment_is_horizontal(a, b):
             cur = (1 if dx > 0 else -1, 0)
-        elif abs(dy) > 1e-9:
+        elif segment_is_vertical(a, b):
             cur = (0, 1 if dy > 0 else -1)
         else:
             continue

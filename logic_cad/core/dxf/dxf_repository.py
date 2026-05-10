@@ -17,6 +17,9 @@ from logic_cad.core.model.constants import (
     LAYER_CONTENTS_TEXT,
     LAYER_DOC_META,
     LAYER_VPORT,
+    LAYER_USER_ARC_CENTER,
+    LAYER_USER_ARC_CONTINUOUS,
+    LAYER_USER_ARC_DASHED,
     LAYER_USER_CIRCLE_CENTER,
     LAYER_USER_CIRCLE_CONTINUOUS,
     LAYER_USER_CIRCLE_DASHED,
@@ -32,15 +35,24 @@ from logic_cad.core.model.constants import (
     LAYER_WIRE_LOGIC,
     LAYER_WIRE_VALUE,
     LINETYPE_CENTER,
+    LINETYPE_CENTER_GAP1_MM,
+    LINETYPE_CENTER_GAP2_MM,
+    LINETYPE_CENTER_LONG_DASH_MM,
+    LINETYPE_CENTER_SHORT_DASH_MM,
     LINETYPE_CONTINUOUS,
     LINETYPE_DASH,
+    LINETYPE_DASHED_DASH_MM,
+    LINETYPE_DASHED_GAP_MM,
     LINETYPE_LOGIC,
     LINETYPE_VALUE,
 )
 from logic_cad.core.model.document_meta import apply_document_meta_stamp, ensure_regapp_document_meta
 from logic_cad.core.model.xdata import ensure_regapp
+from logic_cad.core.pages.page_order import apply_paper_layout_taborder_by_name
+from logic_cad.core.paper_layout_configure import configure_paper_layout_a4_landscape
+from logic_cad.core.paper_layout_strip import strip_ld_contents_area_all_paper_layouts
 
-# USER_LINE / USER_CIRCLE / USER_CLOUD: layer default linetype matches sketch style (entities use ByLayer).
+# USER_LINE / USER_CIRCLE / USER_CLOUD / USER_ARC: layer default linetype matches sketch style (entities use ByLayer).
 _USER_SKETCH_LAYER_DEFAULT_LINETYPE: tuple[tuple[str, str], ...] = (
     (LAYER_USER_LINE_CONTINUOUS, LINETYPE_CONTINUOUS),
     (LAYER_USER_LINE_CENTER, LINETYPE_CENTER),
@@ -51,6 +63,9 @@ _USER_SKETCH_LAYER_DEFAULT_LINETYPE: tuple[tuple[str, str], ...] = (
     (LAYER_USER_CLOUD_CONTINUOUS, LINETYPE_CONTINUOUS),
     (LAYER_USER_CLOUD_CENTER, LINETYPE_CENTER),
     (LAYER_USER_CLOUD_DASHED, LINETYPE_DASH),
+    (LAYER_USER_ARC_CONTINUOUS, LINETYPE_CONTINUOUS),
+    (LAYER_USER_ARC_CENTER, LINETYPE_CENTER),
+    (LAYER_USER_ARC_DASHED, LINETYPE_DASH),
 )
 
 
@@ -131,8 +146,34 @@ def ensure_standard_linetypes(doc: Drawing) -> None:
 
     Entities may reference ``DASHED`` while the table only had ``Continuous`` (ezdxf
     ``new(setup=['styles'])``). Without definitions, PDF export and some CADs draw solid lines.
+
+    After loading defaults, ``DASHED`` and ``CENTER`` simple patterns are always replaced
+    with :mod:`logic_cad.core.model.constants` mm values so PDF export matches the canvas policy.
     """
     setup_linetypes(doc)
+    _apply_app_standard_dash_linetype_patterns(doc)
+
+
+def _apply_app_standard_dash_linetype_patterns(doc: Drawing) -> None:
+    """Overwrite ``DASHED`` / ``CENTER`` table entries with app linetype geometry (mm).
+
+    Args:
+        doc: Drawing whose ``linetypes`` table already includes ISO names from
+            :func:`setup_linetypes`.
+    """
+    if LINETYPE_DASH in doc.linetypes:
+        d_mm = float(LINETYPE_DASHED_DASH_MM)
+        g_mm = float(LINETYPE_DASHED_GAP_MM)
+        doc.linetypes.get(LINETYPE_DASH).setup_pattern([d_mm + g_mm, d_mm, -g_mm])
+    if LINETYPE_CENTER in doc.linetypes:
+        long_mm = float(LINETYPE_CENTER_LONG_DASH_MM)
+        g1 = float(LINETYPE_CENTER_GAP1_MM)
+        short_mm = float(LINETYPE_CENTER_SHORT_DASH_MM)
+        g2 = float(LINETYPE_CENTER_GAP2_MM)
+        total = long_mm + g1 + short_mm + g2
+        doc.linetypes.get(LINETYPE_CENTER).setup_pattern([total, long_mm, -g1, short_mm, -g2])
+
+
 def ensure_standard_layers(doc: Drawing) -> None:
     """Create standard layers with default ACI colors on first insert only.
 
@@ -165,11 +206,6 @@ def readfile(path: str | Path) -> Drawing:
     ensure_standard_linetypes(doc)
     ensure_regapp(doc)
     ensure_regapp_document_meta(doc)
-    from logic_cad.core.services.layout_service import (
-        configure_paper_layout_a4_landscape,
-        strip_ld_contents_area_all_paper_layouts,
-    )
-
     for layout in doc.layouts:
         if not layout.is_modelspace:
             configure_paper_layout_a4_landscape(doc, layout.name)
@@ -182,9 +218,6 @@ def saveas(doc: Drawing, path: str | Path) -> None:
 
     Before writing: set layout ``taborder`` to match paper layout name order (TOC first, then natural sort).
     """
-    from logic_cad.core.pages.page_order import apply_paper_layout_taborder_by_name
-    from logic_cad.core.services.layout_service import strip_ld_contents_area_all_paper_layouts
-
     apply_paper_layout_taborder_by_name(doc)
     strip_ld_contents_area_all_paper_layouts(doc)
     ensure_standard_layers(doc)

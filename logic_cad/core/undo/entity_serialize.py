@@ -9,6 +9,8 @@ import ezdxf
 from ezdxf.document import Drawing
 from ezdxf.entities import DXFEntity
 from ezdxf.entities import DXFGraphic
+from ezdxf.lldxf.tags import Tags
+from ezdxf.lldxf.types import DXFTag
 
 from logic_cad.core.model.constants import APPID
 
@@ -111,8 +113,6 @@ def serialize_entity(doc: Drawing, entity: DXFEntity) -> dict[str, Any]:
     }
     # XDATA as raw tags list (1001, value) pairs for LD_APP
     try:
-        from logic_cad.core.model.constants import APPID
-
         xdata = entity.get_xdata(APPID)
         if xdata:
             base["xdata_ld_app"] = [(t.code, str(t.value)) for t in xdata]
@@ -177,6 +177,23 @@ def serialize_entity(doc: Drawing, entity: DXFEntity) -> dict[str, Any]:
             "text": entity.dxf.text,
             "height": float(entity.dxf.height),
             "rotation": float(entity.dxf.rotation),
+        }
+    elif et == "MTEXT":
+        try:
+            plain = entity.plain_text()
+        except Exception:
+            plain = str(getattr(entity.dxf, "text", "") or "")
+        if isinstance(plain, list):
+            body = "\n".join(str(x) for x in plain)
+        else:
+            body = str(plain)
+        base["geometry"] = {
+            "insert": (entity.dxf.insert.x, entity.dxf.insert.y, entity.dxf.insert.z),
+            "text": body,
+            "char_height": float(getattr(entity.dxf, "char_height", 2.5) or 2.5),
+            "rotation": float(getattr(entity.dxf, "rotation", 0.0) or 0.0),
+            "width": float(getattr(entity.dxf, "width", 0.0) or 0.0),
+            "attachment_point": int(getattr(entity.dxf, "attachment_point", 1) or 1),
         }
     elif et == "ATTDEF":
         base["geometry"] = {
@@ -316,8 +333,6 @@ def apply_serialized_payload_in_place(entity: DXFEntity, payload: dict[str, Any]
 def _apply_xdata(entity: DXFEntity, xdata_tags: list[tuple[int, str]] | None) -> None:
     if not xdata_tags:
         return
-    from ezdxf.lldxf.tags import Tags
-    from ezdxf.lldxf.types import DXFTag
 
     tags = Tags()
     for code, val in xdata_tags:
@@ -430,6 +445,22 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
         )
         entity.dxf.insert = g["insert"][:2]
         _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
+    elif et == "MTEXT":
+        g = geom
+        body = str(g.get("text", "")).replace("\r\n", "\n").replace("\r", "\n")
+        dxf_body = body.replace("\n", "\\P")
+        entity = blk.add_mtext(
+            dxf_body,
+            dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
+        )
+        ins = g.get("insert") or (0.0, 0.0, 0.0)
+        entity.dxf.insert = (float(ins[0]), float(ins[1]), float(ins[2]) if len(ins) > 2 else 0.0)
+        entity.dxf.char_height = max(0.25, float(g.get("char_height", 2.5) or 2.5))
+        entity.dxf.rotation = float(g.get("rotation", 0.0) or 0.0)
+        ww = float(g.get("width", 0.0) or 0.0)
+        entity.dxf.width = ww if ww > 1e-9 else 0.0
+        ap = int(g.get("attachment_point", 1) or 1)
+        entity.dxf.attachment_point = ap if 1 <= ap <= 9 else 1
     elif et == "ATTDEF":
         g = geom
         entity = blk.add_attdef(

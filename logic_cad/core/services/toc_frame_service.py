@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from ezdxf import bbox
 from ezdxf.document import Drawing
 
 from logic_cad.core.attrib_tags import FRAME_ATTDEF_TAGS
@@ -34,12 +35,13 @@ from logic_cad.core.pages.page_layout_meta import (
     read_page_meta,
 )
 from logic_cad.core.pages.page_order import is_toc_layout_name, toc_layout_names_sorted, toc_page_id_for_slot
+from logic_cad.core.pages.toc_contents_layout import contents_area_bbox_mm, toc_grid_cols_and_data_rows
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.services.layout_service import (
     LayoutService,
     ensure_frame_template_blocks,
     import_frame_template,
 )
-from logic_cad.core.pages.toc_contents_layout import contents_area_bbox_mm, toc_grid_cols_and_data_rows
 from logic_cad.core.model.xdata import build_ld_app_tags, get_type, new_uid, set_entity_xdata
 
 TOC_TEXT_TYPE = "TOC_TEXT"
@@ -96,7 +98,7 @@ def refresh_frame_for_layout(doc: Drawing, layout_name: str) -> None:
     layout = doc.layouts.get(layout_name)
     if layout.is_modelspace:
         return
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, layout_name)
     ins = _find_paper_frame_insert(blk)
     if ins is None:
         return
@@ -130,8 +132,6 @@ def _contents_frame_bbox_size_mm(doc: Drawing, block_name: str) -> tuple[float, 
     if not ents:
         return None
     try:
-        from ezdxf import bbox
-
         ext = bbox.extents(ents, fast=True)
         if ext.has_data:
             return float(ext.size.x), float(ext.size.y)
@@ -255,8 +255,7 @@ def _regenerate_toc_mtext_fallback(doc: Drawing, ls: LayoutService, name: str, p
         "toc",
         f"layout={name!r}: using MTEXT TOC fallback (CONTENTS_* grid has no capacity)",
     )
-    layout = doc.layouts.get(name)
-    blk = doc.blocks.get(layout.block_record_name)
+    blk = paper_layout_block(doc, name)
     rows: list[str] = ["page\t説明\t改訂番号"]
     for i, pname in enumerate(pages, start=1):
         m = read_page_meta(doc, pname)
@@ -345,12 +344,12 @@ def regenerate_toc(doc: Drawing, *, toc_name: str | None = None) -> None:
         doc.layouts.new(TOC_LAYOUT_NAME)
         ls.ensure_minimal_page(TOC_LAYOUT_NAME)
     elif TOC_LAYOUT_NAME in doc.layouts:
-        tblk = doc.blocks.get(doc.layouts.get(TOC_LAYOUT_NAME).block_record_name)
+        tblk = paper_layout_block(doc, TOC_LAYOUT_NAME)
         if _find_paper_frame_insert(tblk) is None:
             import_frame_template(doc, TOC_LAYOUT_NAME, path=None)
 
     for n in toc_layout_names_sorted(doc):
-        b = doc.blocks.get(doc.layouts.get(n).block_record_name)
+        b = paper_layout_block(doc, n)
         _clear_generated_toc_entities(doc, b)
 
     if not pages:
@@ -362,7 +361,7 @@ def regenerate_toc(doc: Drawing, *, toc_name: str | None = None) -> None:
 
     default_bb = _default_contents_bbox()
     names_all = toc_layout_names_sorted(doc)
-    probe_blk = doc.blocks.get(doc.layouts.get(names_all[0]).block_record_name)
+    probe_blk = paper_layout_block(doc, names_all[0])
     raw_probe = contents_area_bbox_mm(probe_blk)
     if raw_probe is None:
         logic_cad_log(
@@ -397,7 +396,7 @@ def regenerate_toc(doc: Drawing, *, toc_name: str | None = None) -> None:
             ls.ensure_minimal_page(nn)
             names_all = toc_layout_names_sorted(doc)
         name = names_all[idx]
-        blk = doc.blocks.get(doc.layouts.get(name).block_record_name)
+        blk = paper_layout_block(doc, name)
         raw_bb = contents_area_bbox_mm(blk)
         if raw_bb is None and idx > 0:
             logic_cad_log(
@@ -428,7 +427,7 @@ def regenerate_toc(doc: Drawing, *, toc_name: str | None = None) -> None:
         idx += 1
 
     for name in names_all[idx:]:
-        blk = doc.blocks.get(doc.layouts.get(name).block_record_name)
+        blk = paper_layout_block(doc, name)
         _clear_generated_toc_entities(doc, blk)
 
     for pname in ls.list_pages():

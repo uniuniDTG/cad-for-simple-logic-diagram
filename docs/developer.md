@@ -3,20 +3,24 @@
 デバッグログ、起動引数、環境変数の対応をまとめます。実装の入口は主に次のとおりです。
 
 - 一般ログ: `logic_cad/core/debug/debug_log.py`（`logic_cad_log` / `logic_cad_log_separator`）
-- シンボルライブラリ: `logic_cad/core/debug/debug_symlib.py`（`symlib_log`）；再読み込み API は `logic_cad/core/services/layout_service.py`（`reload_symbol_library`）
+- シンボルライブラリ: `logic_cad/core/debug/debug_symlib.py`（`symlib_log`）；再読み込み API は `logic_cad/core/services/layout_service/` パッケージ（`reload_symbol_library` 等、`__init__.py` から従来どおり再エクスポート）
 - 新規図面の先頭紙レイアウト名: `logic_cad/core/model/constants.py` の `FIRST_PAGE_NAME`（`LogicDiagram.new` が ezdxf 既定の1枚目をこの名前へリネーム。既存 DXF を開いたときはファイル内の名前のまま）
-- 図枠テンプレートの明示パス適用・置き換え: `logic_cad/core/services/layout_service.py`（`apply_frame_template_from_path`）
+- 図枠テンプレートの明示パス適用・置き換え: `logic_cad/core/services/layout_service/layout_frame_template.py`（`apply_frame_template_from_path`；`layout_service` パッケージからも利用可）
 - 目次（TOC）フォールバック: `logic_cad/core/services/toc_frame_service.py`（`--debug` か root logger が `INFO` 以下のとき）
 - ステータスバー: キャンバス上のカーソル位置を DXF 図面座標 (mm) で表示。シーン座標は `dxf_from_scene_pos`（`logic_cad/ui/snap_utils.py`）で mm に変換
-- **インアプリ・ブロック編集（BEDIT 風）**: 左タブ「ブロック」。編集は **スクラッチ `Drawing`**（`BlockEditSession` / `logic_cad/core/services/block_edit_session.py`）上で行い、**本体へ適用**で `doc.blocks[name]` の中身を差し替え。**適用はメインの `HistoryService` に積まない**（スクラッチ側の Undo のみ）。新規/開く/閉じる/図枠・シンボルライブラリ操作は `BlockEditPanel.request_end_session_for_nav` で先にセッション終了。**同一 `LD_PORT_*` レイヤへの POINT 重複は禁止**（`block_edit_helpers.port_layer_is_taken`）。キャンバス実装: `logic_cad/ui/symbol_block_editor/`
+- **プロパティパネル**: `logic_cad/ui/panels/property_panel/`。**インポートパスは不変**（`from logic_cad.ui.panels.property_panel import PropertyPanel`）。`widget.py` が QWidget とスタック構成・共通ポート表示、`symbol_section.py` / `wire_section.py` / `block_edit_section.py` が機能別 mixin、`helpers.py` が QMessageBox 共通化と `port_sort_key`。
+- **インアプリ・ブロック編集（BEDIT 風）**: 左タブ「ブロック」。左の一覧は `list_block_editor_block_names`（`logic_cad.core.services.layout_service`）。`PAGE_FROM` / `PAGE_TO` はブロック編集一覧に出す（クロスページ・リンク用定義の編集）。`INPAGE_FROM` / `INPAGE_TO` は一覧に出さない（インページ・リンクは専用 UI）。これらはいずれもパレット（`list_palette_block_names`）からは隠す。編集は **スクラッチ `Drawing`**（`BlockEditSession` / `logic_cad/core/services/block_edit_session.py`）上で行い、**本体へ適用**で `doc.blocks[name]` の中身を差し替え。**適用はメインの `HistoryService` に積まない**（スクラッチ側の Undo のみ）。新規/開く/閉じる/図枠・シンボルライブラリ操作は `BlockEditPanel.request_end_session_for_nav` で先にセッション終了。**同一 `LD_PORT_*` レイヤへの POINT 重複は禁止**（`block_edit_helpers.port_layer_is_taken`）。キャンバス実装: `logic_cad/ui/symbol_block_editor/`
+- **INPAGE_REF（同一紙面上のリンク）**: LD_APP の `sym` + ATTRIB `SYM` が表示文字。自動採番は `inpage_link_name_auto` が省略/`"1"` のペアだけが ※1, ※2…（手動 `"0"` のペアは連番を消費しない）。プロパティから手動文字列を設定するとペア両端が同期され、`refresh_inpage_ref_syms_on_layout` が他の自動ペアの番号を詰め直す。実装: `logic_cad/core/pages/inpage_ref.py` / `SymbolService.set_inpage_ref_link_display`
 - 起動引数: `logic_cad/app/main.py`
 - ルーティングプロファイルの env 上書き: `logic_cad/core/routing/profile.py`（`apply_routing_env_overrides`）
 - シンボル移動後の再配線の区間計測: `logic_cad/core/debug/routing_perf.py`（`LOGIC_CAD_PERF_ROUTING=1`）
 - キャンバス上の QGraphicsItem の Z 順（ヒットテスト・重なり）: `logic_cad/ui/scene_item/z_order.py`（ルーティング一時オーバーレイの 10000 台は同ファイル docstring のとおり別帯）
+- **ユーザースケッチツールバー**: `logic_cad/ui/main_window/tool_bridge.py` のスケッチ系 `QPushButton` は相互排他（`exclusive_tool_buttons`）。リリース前または大きめの UI リファクタ後は、各スケッチツールの ON/OFF・スケッチ ON 時のワイヤツール解除が意図どおりか実機で一度確認するとよい。
 - OSNAP（限定実装）: `logic_cad/ui/scene_item/osnap.py`（`LD_PORT` のみ対象。配線モード（自動/手動）でポートスナップに利用、それ以外は `snap_to_grid`）
 - ポートキー解析（IN/OUT/INOUT）: `logic_cad/core/model/port_key.py`（`startswith("IN")` のような曖昧判定を避ける）
 - `WIRE_BRANCH` ポート仕様: `INOUT0_MULTI` 単一ポート（多接続可）。`scene.py` のクリック正規化、`port_src_dst_solver.py` の制約、`symbol_item.py` の丸色判定（3本以上で白）を合わせて更新する。
 - ユーザー直線ツール: ツールバーの直線ボタンを右クリックすると、次に描く線の線種（CONTINUOUS / DASHED / CENTER）を選べる。状態は `DiagramScene` の `user_sketch_line_default_linetype` / `set_user_sketch_line_default_linetype`
+- メインキャンバスの注釈テキスト配置・ブロック編集の `LD_TEXT` 配置: 共通ダイアログ `logic_cad/ui/dialogs/user_text_place_dialog.py` の `prompt_dxf_text_string_and_height`（文字列＋字高 mm）。メインの既定字高の初期値は `USER_TEXT_DEFAULT_HEIGHT_MM`
 - 文字列の検索・置換: `logic_cad/core/services/text_find_replace.py`（`TextSearchHit` / `list_text_search_hits`、対象は `SYM` / `LABEL*` と `USER_TEXT` 等）。`logic_cad/ui/text_search_navigate.py`（`apply_text_search_hit`）。UI: `find_replace_dialog.py`、Ctrl+F で**非モーダル**検索（前検索 / 次検索 / キャンセル、F3 / Shift+F3、パネル非表示時もメインにフォーカスがあれば可）。**検索語と各オプションは図面に保存されない**（セッション内の UI メモリのみ）。Ctrl+R はモーダル置換
 - **アプリのユーザ設定（図面外）**: **ファイル** → **ユーザ設定…**。永続化は `logic_cad/ui/app_user_settings.py` の `QSettings`（**Ini 形式**）。起動時に `logic_cad/app/main.py` で `QApplication.setOrganizationName("LogicCAD")` / `setApplicationName("Logic CAD")` を設定しているため、保存先は OS の既定ユーザ設定ディレクトリ配下の `.ini`（例: Windows では `%LOCALAPPDATA%` 系。実際のパスは実行時に `QSettings.fileName()` で確認可能）。クロスヘアは `DiagramView` がビューポート座標でオーバーレイ描画（`none` / `full` / `local`）。**レガシー Ini の `mode=both` は読み込み時に `full` として扱う**（保存はされない）。交点の中空□は Ini キー `crosshair/center_box_side_px`（0＝□なし、十字のみ）。
 - メインウィンドウのタイトルバー表示（`Logic CAD vX.Y.Z ...`）: `logic_cad/core/model/constants.py` の `APP_DISPLAY_NAME_WITH_VERSION` を `logic_cad/ui/main_window/document_actions.py` の `build_window_title` が参照して組み立てる。
@@ -74,9 +78,15 @@ python -m logic_cad.app.main --debug
 
 ---
 
+## ブロック編集スクラッチ（`create_scratch_with_block_from_main`）
+
+本体から BEDIT 用スクラッチへブロックを複製する際は **`serialize_entity` / `restore_entity_from_payload`** により、到達可能なブロック定義ツリー（`INSERT` 依存）ごとコピーする。`ezdxf.addons.Importer` は [公式どおり XDATA を除去する](https://ezdxf.readthedocs.io/en/stable/addons/importer.html)ためこの経路では使わない（再オープン後に `USER_*` ジオメトリの LD_APP が欠けパッシブ表示になるのを防ぐ）。先に全依存ブロックの空定義を作成してからエンティティを復元し、ネストした `INSERT` が解決できるようにしている。
+
+---
+
 ## シンボルライブラリ再読み込み（`reload_symbol_library`）
 
-`logic_cad/core/services/layout_service.reload_symbol_library` は、起動中に `logic_cad/assets/symbol_library.dxf` を現在の `Drawing` へ再度マージする（UI は **テンプレート** → **シンボルライブラリを再読み込み**）。
+`logic_cad/core/services/layout_service.reload_symbol_library` は、起動中に `logic_cad/assets/symbol_library.dxf` を現在の `Drawing` へ再度マージする（UI は **テンプレート** → **シンボルライブラリを再読み込み**）。実装モジュールは `layout_service/layout_symbol_library.py`。
 
 `import_symbol_library` を**同一ドキュメントに二度**適用すると、ezdxf `Importer` の既定 `rename=True` により既存ブロック名が衝突し、`BLOCK0` のような**複製ブロック**が増える。再読み込みでは、ライブラリに既に存在するブロック名については対象 `BlockLayout` 内のエンティティを削除してから `Importer.import_entities` で差し替え、`finalize`（INSERT 名解決）の前に `Importer.imported_blocks[name] = name` をシードして、解決時に意図せぬ複製を防ぐ。ソースにしか無い名前は従来どおり `import_block` で追加する。
 
@@ -84,7 +94,7 @@ python -m logic_cad.app.main --debug
 
 ## 図枠テンプレート適用（`apply_frame_template_from_path`）
 
-`logic_cad/core/services/layout_service.apply_frame_template_from_path` は、ユーザーが選んだ DXF（`generate/frame_template.py` と同系の `LD_PAPER_FRAME` / `CONTENTS_*` を想定）から、テンプレ用ブロック定義を `reload_symbol_library` と同様に**中身差し替え**し、各用紙レイアウトで **`LD_PAPER_FRAME` の INSERT を削除**（未タグの旧コピー含む）→ **`LD_CONTENTS_AREA` ガイドの削除** → `import_frame_template(..., path=...)` で再配置 → `regenerate_toc` / `refresh_all_frame_captions`。UI は **テンプレート** → **図枠テンプレートを適用…**。
+`logic_cad/core/services/layout_service.apply_frame_template_from_path` は、ユーザーが選んだ DXF（`generate/frame_template.py` と同系の `LD_PAPER_FRAME` / `CONTENTS_*` を想定）から、テンプレ用ブロック定義を `reload_symbol_library` と同様に**中身差し替え**し、各用紙レイアウトで **`LD_PAPER_FRAME` の INSERT を削除**（未タグの旧コピー含む）→ **`LD_CONTENTS_AREA` ガイドの削除** → `import_frame_template(..., path=...)` で再配置 → `regenerate_toc` / `refresh_all_frame_captions`。UI は **テンプレート** → **図枠テンプレートを適用…**。実装モジュールは `layout_service/layout_frame_template.py`。
 
 - 2026-04 更新: `import_frame_template` は template の modelspace をコピーせず、`LD_PAPER_FRAME` / `CONTENTS_*` のブロック定義を取り込んだうえで、用紙レイアウトに `LD_PAPER_FRAME` の INSERT を 1 つだけ配置する。
 - 2026-04 更新: 図枠 ATTDEF は `DWG_NO`, `PAGE_NAME`, `PAGE_DESC`, `PAGE_REV`, `PAGE_NUM`, `PAGE_TOTAL` の 6 タグを直接同期する（`{{}}` 展開非依存）。
@@ -337,6 +347,27 @@ python -m logic_cad.app.main --debug
 
 ---
 
+## ブロック編集: ATTDEF／ポートの開幕スナップ抑止
+
+`logic_cad/ui/symbol_block_editor/scene.py` で、`_rebuild` によるプログラム配置では `AttdefEditItem` の `_programmatic_pos_depth` および `PortMarkerItem.place_at_dxf_mm` が効き、`setPos` がグリッドに丸められない。インタラクティブな移動時のみ従来どおり `itemChange` でスナップする。`_commit_attdef_moves` / `_commit_port_moves` は `_moved` / `_pm_moved` が立っているアイテムだけ DXF に書き戻す。
+
+そのうえで「フラグだけ誤って立つ」場合があるため、左クリック押下時に `_snapshot_selection_drag_starts` が記録したシーン座標から実際に動いたアイテムだけコミットする（`_item_scene_dragged_since_press`）。
+
+別要素を動かしたときのマウス解放で、ピッチとの丸め差だけで ATTDEF／ポートがずれるのを防ぐ。
+
+関連テスト: `logic_cad/tests/test_block_edit.py`（`test_block_edit_refresh_keeps_off_grid_attdef_scene_pos` / `test_block_edit_refresh_keeps_off_grid_port_scene_pos`）
+
+---
+
+## ブロック編集: 新規 ATTDEF 既定と「本体へ適用」後の ATTRIB 同期
+
+- **`add_attdef_to_block`**（`logic_cad/core/services/block_edit_helpers.py`）で追加する ATTDEF は、左寄せ **`halign = 0`** と **`align_point`（`insert` と同じ 3D 点）**を明示する。新規配置シンボルの ATTRIB が `dxfattribs_for_attrib_from_attdef` 経由でも整列情報欠落しにくくするため。
+- **「本体へ適用」直後**（`logic_cad/ui/panels/block_edit_panel.py`）: 確認なしで、このセッションのブロック名を参照する **INSERT の ATTRIB 幾何**を ATTDEF に合わせて `sync_insert_attrib_geometry_for_block_name` で同期する（`logic_cad/core/dxf/attrib_geometry_sync.py`）。**`text` と `invisible` は変更しない**。
+
+関連テスト: `logic_cad/tests/test_block_edit.py`（`test_add_attdef_to_block_sets_halign_and_align_point` / `test_sync_insert_attrib_geometry_for_block_name_only_matching_inserts`）
+
+---
+
 ## シンボルクリップボード（プロセス間コピー）
 
 編集メニューのコピー／貼り付けは、`MainWindow._symbol_clipboard` に加え **`QClipboard`** に独自 MIME `application/x-logic-cad-symbol-clipboard`（UTF-8 JSON、実装は `logic_cad/core/symbol_clipboard_codec.py`）を書き込む。別プロセスの logic_cad でも、同じブロック定義が貼り付け先 DXF に存在すれば貼り付け可能。ブロック未定義の場合は従来どおりエラーになる。
@@ -345,7 +376,7 @@ python -m logic_cad.app.main --debug
 
 ## PAGE_REF の PAGE_NAME / PAGE_DESC 表示
 
-- `PAGE_REF` は XDATA キー `show_page_name` / `show_page_desc`（`"1"` のとき ON）で、`PAGE_FROM` / `PAGE_TO` に定義された `PAGE_NAME` / `PAGE_DESC` ATTDEF の表示可否をそれぞれ切り替える。
+- `PAGE_REF` は XDATA キー `show_page_name` / `show_page_desc`（`"1"` のとき ON）で、`PAGE_FROM` / `PAGE_TO` **ブロック定義**内の **`PAGE_NAME` / `PAGE_DESC` ATTDEF** の表示可否をそれぞれ切り替える。追加する ATTDEF のタグ名は **`PAGE_NAME` と `PAGE_DESC`**（ブロック名の `PAGE_FROM` / `PAGE_TO` を ATTDEF タグにする必要はない）。
 - 新規配置時のデフォルトは両方 OFF（`"0"`）で、`SYM` は従来どおり常に非表示 ATTRIB として同期する。
 - `refresh_page_ref_syms_on_layout()` は `SYM` の再採番に加え、リンク先レイアウト名・`page_desc` を `PAGE_NAME` / `PAGE_DESC` ATTRIB に同期する（ATTDEF が無い場合は no-op）。
 
@@ -355,4 +386,55 @@ python -m logic_cad.app.main --debug
 
 - `WireArrowItem`（`logic_cad/ui/items/wire_arrow_item.py`）の矢印描画は、`WIRE` エンティティの `linetype` に関係なく常に `Qt.PenStyle.SolidLine` で描画する。
 - DXF 側の `WIRE_ARROW` には従来どおり親 `WIRE` の `linetype` を同期して保持する（`sync_wire_arrow_dxf`）。データ整合性は維持しつつ、UI表示のみ矢印を実線固定にする設計。
-- AND/OR の入力スタブ矢印（`SymbolItem._paint_gate_stub_in_arrows`）も同様に実線を明示指定し、矢印系描画の仕様を統一した。
+- AND/OR の入力スタブ矢印は `GATE_INPUT_STUB_ARROW`（レイアウト直下 `LWPOLYLINE` / `LD_SYMBOL`）として `SymbolService.sync_gate_stub_arrows_dxf` が同期し、PDF／素の DXF でも `WIRE` の `WIRE_ARROW` と同様に見える。Qt 側は `WireArrowItem` で当該 LW を描画し、実線は `WireArrowItem` と同じく固定。
+
+---
+
+## INSERT ATTRIB と ATTDEF の幾何（Qt vs matplotlib）（2026-05）
+
+Qt はブロック内 **ATTDEF**＋`normalize_dxf_text_entity()` でラベル位置を決めるが、ezdxf の matplotlib 経路は **ATTRIB** 実体の DXF 整列情報のまま描画する。食い違うと PDF だけズレうる。
+
+- 共通: `logic_cad/core/dxf/attrib_geometry_sync.py`（`apply_attdef_text_geometry_to_attrib` / `sync_paper_layout_insert_attrib_geometry_from_attdefs` は **任意** の修復用。ATTDEF に `align_point` が無いときは ATTRIB 側の `align_point` を触らない）
+- **新規** ATTRIB: `dxfattribs_for_attrib_from_attdef()` を `SymbolService._add_insert_attrib` と `page_ref._upsert_insert_attrib_from_attdef` で利用（`add_auto_attribs` 失敗時など）
+- **既存** ATTRIB（PAGE_REF の refresh 経由）: `_upsert_insert_attrib_from_attdef` は **`text` / `invisible` のみ**更新し、幾何を ATTDEF に毎回追従させない（定義側の退化座標で refresh が悪化し続けるのを避ける）。定義を直したあと位置を合わせるには `sync_insert_attrib_geometry_from_attdefs` か、ブロック適用後の `ensure_cross_page_reference_blocks` 内の退化 ATTDEF 修復＋同期に任せる
+- **PDF エクスポート（子 ATTRIB の WCS）**: ezdxf の matplotlib フロントは `virtual_entities()` のあと `insert.attribs` を **INSERT 行列なし**で描く。そのため子 ATTRIB の `insert`／`align_point` は **紙レイアウト WCS** である必要がある。`export_paper_layouts_to_pdf` は各ページの `draw_layout` 直前に `paper_layout_attrib_wcs_bake_for_pdf_session`（内部で snapshot → bake → 描画後 restore）を使い、**ブロック局所のまま**と判定できたときだけ ATTDEF 幾何を `Insert.matrix44()` で焼き、ライブ DXF は復元する。既に期待 WCS に近い座標（CAD 側で焼かれたケース）は距離閾値でスキップし二重変換を避ける（`PDF_ATTRIB_POSITION_EQ_TOL_MM`）。
+
+### ユーザー向け: PAGE_REF の PAGE_NAME / PAGE_DESC が枠外／原点付近になるとき
+
+- **シンボルライブラリの再読込**: プロジェクトメニュー等から **シンボルライブラリ再読込**（`reload_symbol_library`）を実行すると、`PAGE_FROM` / `PAGE_TO` のブロック定義がバンドル版に近づき、`PAGE_NAME` / `PAGE_DESC` の ATTDEF 位置もライブラリ準拠になりやすい。
+- **ブロックエディタ**: 左の「ブロック」から `PAGE_FROM` または `PAGE_TO` を開き、`PAGE_NAME` / `PAGE_DESC` の **ATTDEF** の挿入点を枠内の意図した位置へ移動する（原点 `(0,0)` のままにしない）。
+- **自動修復**: `ensure_cross_page_reference_blocks` 実行時、`PAGE_NAME` / `PAGE_DESC` の ATTDEF 挿入点が原点付近に退化している場合は、ビルトインと同じ座標・字高・水平整列へ書き換え、既存の PAGE_REF INSERT に対して **一度** `sync_insert_attrib_geometry_from_attdefs` 相当の同期を行う。
+- **任意の一括幾何同期**: 全レイアウトへの `sync_paper_layout_insert_attrib_geometry_from_attdefs` 等の一括同期は行わない（整合済みの ATTRIB を壊しうるため）。必要ならスクリプトや手動で呼ぶ（上記の **PDF 用 bake／restore** はエクスポート専用で、永続データを変えない）。
+
+関連テスト: `logic_cad/tests/test_attrib_geometry_sync.py`
+
+---
+
+## PDF エクスポート: HATCH の `pattern.lines` と Undo（2026-05）
+
+- **症状**: 稀に matplotlib 経路で ``TypeError: object of type 'NoneType' has no len``。ezdxf の `draw_hatch_pattern` が ``pattern is not None`` かつ ``pattern.lines is None`` を想定していないため。
+- **対策**: `logic_cad/core/services/pdf_export_service.py` の `_PdfExportFrontend.draw_hatch_pattern` で `lines` を検証してから `super()` に委譲。
+- **観察**: シンボル削除→Undo 後に PDF が通ることがある。Undo の `restore_entity_from_payload` でエンティティが作り直され、ezdxf 上の HATCH 内部状態が整合する場合がある（論理内容は同じでもオブジェクト状態が変わりうる）。
+- **調査用**: `uv run python scripts/list_pattern_hatches.py drawing.dxf`（ブロック定義内の HATCH も列挙。`risky_lines_none=True` が疑わしい）。
+
+関連テスト: `logic_cad/tests/test_pdf_export.py`（`test_pdf_frontend_draw_hatch_pattern_skips_when_pattern_lines_is_none`）
+
+---
+
+## PDF: PAGE_REF の SYM と PAGE_NAME / PAGE_DESC（2026-05）
+
+- **DXF**: `refresh_page_ref_syms_on_layout` / `place_page_link` は **PAGE_REF** の **SYM** を常に可視（`invisible=0`）。**PAGE_NAME / PAGE_DESC** は `show_page_name` / `show_target_info` 等に従い `visible` 切替。旧ドキュメントで SYM が非表示の場合は PDF clone 側の `_maybe_unhide_page_like_sym_attrib_for_pdf` が吸収。
+- **Qt**: `SymbolItem` が PAGE_REF / INPAGE_REF で SYM ラベルを強制表示。
+- **PDF**: [`pdf_export_service._maybe_unhide_page_like_sym_attrib_for_pdf`](f:/python_programs/logic_cad/logic_cad/core/services/pdf_export_service.py) が **export 用 clone のみ** `SYM` を `invisible=0`（親 INSERT が `PAGE_REF` / `INPAGE_REF` のとき）。**PAGE_NAME / PAGE_DESC は clone ではいじらない**（チェックオン時だけ従来どおり描画）。
+- **幾何**: ATTRIB の `align_point` 欠落対策は `_normalize_text_anchor_for_pdf_clone`（`simplified_text_chunks` の `NoneType has no len` 回避）。
+
+関連テスト: `logic_cad/tests/test_pdf_export.py`（`test_export_pdf_page_ref_invisible_sym_writes_file` / `test_export_symbol_library_pdf_nonzero_size`）
+
+---
+
+## DXF 永続レイヤーと `layout_service` の依存（Phase 1, 2026-05）
+
+- **問題**: `dxf_repository` が `layout_service` を関数内 import しており、`layout_service` が同じモジュールの `ensure_standard_layers` / `load_dxf_with_recover` を参照しているため初期化順の問題を避ける必要があった。
+- **対策**: ``LD_CONTENTS_AREA`` の紙レイアウト側ストリップを `logic_cad/core/paper_layout_strip.py` に、A4 用紙＋ VIEWPORT／layer0 デコイ除去まわりを `logic_cad/core/paper_layout_configure.py` に分離。いずれも `dxf_repository` および `paper_layout_access` 以外の上流サービスに依存しない。
+- **結果**: `dxf_repository.saveas` / `readfile` はトップレベル import のみ。**`configure_paper_layout_a4_landscape` は `paper_layout_configure` が正本**、`layout_service` はそこから再エクスポートして既存テスト／呼び出し元を維持。
+

@@ -23,7 +23,6 @@ from logic_cad.core.services.layout_service import LayoutService, ensure_frame_t
 from logic_cad.core.services.toc_frame_service import (
     _contents_frame_bbox_size_mm,
     _default_contents_bbox,
-    _place_toc_grid_on_block,
     _regenerate_toc_mtext_fallback,
     _toc_cell_metrics_from_contents_frame,
     regenerate_toc,
@@ -90,34 +89,6 @@ def test_regenerate_toc_inserts_header_and_rows() -> None:
     types = [get_type(e) for e in blk if e.dxftype() == "INSERT"]
     assert ENTITY_TYPE_TOC_HEADER in types
     assert ENTITY_TYPE_TOC_ROW in types
-
-
-def _page_name_from_toc_row(ins) -> str:
-    for a in ins.attribs:
-        if str(a.dxf.tag).upper() == "PAGE_NAME":
-            return str(a.dxf.text or "").strip()
-    return ""
-
-
-def test_place_toc_grid_column_major_and_padding() -> None:
-    """Column-major fill; pad with empty PAGE_NAME cells to full cols×rows."""
-    doc = new_document()
-    ls = LayoutService(doc)
-    for n in ("P2", "P3", "P4"):
-        ls.add_page(n)
-    ensure_frame_template_blocks(doc)
-    blk = doc.blocks.new("TMP_TOC_GRID")
-    blk.add_lwpolyline(
-        [(0.0, 32.0), (120.0, 32.0), (120.0, 0.0), (0.0, 0.0)],
-        close=True,
-        dxfattribs={"layer": LAYER_CONTENTS_AREA},
-    )
-    _place_toc_grid_on_block(doc, blk, ["Layout1", "P2", "P3", "P4"], (0.0, 0.0, 120.0, 32.0), 60.0, 8.0, 8.0)
-    rows = [e for e in blk if e.dxftype() == "INSERT" and get_type(e) == ENTITY_TYPE_TOC_ROW]
-    assert len(rows) == 6
-    ordered = sorted(rows, key=lambda e: (round(e.dxf.insert.x, 4), -round(e.dxf.insert.y, 4)))
-    names = [_page_name_from_toc_row(e) for e in ordered]
-    assert names == ["Layout1", "P2", "P3", "P4", "", ""]
 
 
 def test_regenerate_toc_row_count_matches_grid_capacity() -> None:

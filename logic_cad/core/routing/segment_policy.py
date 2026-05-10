@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from logic_cad.core.geometry.manhattan_metrics import manhattan_distance, segment_is_axis_aligned
 from logic_cad.core.model.constants import GRID_PITCH, ROUTE_ESCAPE_MM
 
 from .obstacles import segment_hits_obstacle_rects
@@ -42,9 +43,9 @@ def first_axis_leg_clear(
         return False
     dx = fh[0] - src0[0]
     dy = fh[1] - src0[1]
-    if abs(dx) > 1e-9 and abs(dy) > 1e-9:
+    if not segment_is_axis_aligned(src0, fh):
         return False
-    leg_len = abs(dx) + abs(dy)
+    leg_len = manhattan_distance(src0, fh)
     if leg_len + 1e-9 < min_first_leg_mm:
         return False
     pitch_safe = pitch if pitch > 1e-12 else GRID_PITCH

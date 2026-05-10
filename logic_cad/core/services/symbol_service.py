@@ -5,10 +5,14 @@ from __future__ import annotations
 import re
 
 import ezdxf
+from ezdxf import bbox
 from ezdxf.document import Drawing
 from ezdxf.entities import Insert
+from ezdxf.math import Vec3
 
 from logic_cad.core.attrib_tags import is_supported_attdef_tag
+from logic_cad.core.debug.debug_log import logic_cad_log
+from logic_cad.core.dxf.attrib_geometry_sync import dxfattribs_for_attrib_from_attdef
 from logic_cad.core.model.constants import (
     BLOCK_CHECKPOINT,
     BLOCK_INPAGE_FROM,
@@ -18,22 +22,32 @@ from logic_cad.core.model.constants import (
     BLOCK_WIRE_BRANCH,
     ENTITY_TYPE_CHECKPOINT,
     ENTITY_TYPE_INPAGE_REF,
+    ENTITY_TYPE_GATE_INPUT_STUB_ARROW,
+    ENTITY_TYPE_WIRE_BRANCH,
+    GATE_STUB_ARROW_INDEX_XDATA,
+    GATE_STUB_ARROW_PARENT_XDATA,
+    GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW,
+    LAYER_SYMBOL,
+    LINETYPE_CONTINUOUS,
+    MIN_AND_OR_INPUTS,
+    INPAGE_LINK_DISPLAY_MAX_LEN,
+    INPAGE_LINK_NAME_AUTO_XDATA,
+    INPAGE_SYM_HEIGHT_MM,
+    INPAGE_SYM_HEIGHT_XDATA,
     PAGE_REF_RANK_XDATA,
     PAGE_REF_SHOW_PAGE_DESC_XDATA,
     PAGE_REF_SHOW_PAGE_NAME_XDATA,
     PAGE_REF_SHOW_TARGET_INFO_XDATA,
-    ENTITY_TYPE_WIRE_BRANCH,
-    INPAGE_SYM_HEIGHT_MM,
-    INPAGE_SYM_HEIGHT_XDATA,
-    GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW,
     PEER_UID_XDATA,
     SYMBOL_BLOCK_MAX_DIM_MM,
     TARGET_LAYOUT_XDATA,
 )
-from logic_cad.core.debug.debug_log import logic_cad_log
-from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory, gate_view_geometry_from_block_name
+from logic_cad.core.model.xdata import build_ld_app_tags, get_type, get_uid, new_uid, read_ld_app_dict, set_entity_xdata
 from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
 from logic_cad.core.pages.page_ref import find_page_ref_insert, refresh_page_ref_syms_on_layout
+from logic_cad.core.paper_layout_access import paper_layout_block
+from logic_cad.core.routing.wire_arrow_geometry import wire_in_arrow_wing_points_xyb
+from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory, gate_view_geometry_from_block_name
 from logic_cad.core.services.layout_service import (
     ensure_checkpoint_block,
     ensure_cross_page_reference_blocks,
@@ -41,7 +55,6 @@ from logic_cad.core.services.layout_service import (
     ensure_wire_branch_block,
 )
 from logic_cad.core.symbol_clipboard import SymbolCopyRecord
-from logic_cad.core.model.xdata import build_ld_app_tags, get_type, get_uid, new_uid, read_ld_app_dict, set_entity_xdata
 
 
 def _page_ref_block_name(doc: Drawing, *, outgoing: bool) -> str:
@@ -61,8 +74,6 @@ def _uniform_scale_for_block(doc: Drawing, block_name: str) -> float:
         return 1.0
     b = doc.blocks.get(block_name)
     try:
-        from ezdxf import bbox
-
         e = bbox.extents(b)
     except Exception:
         return 1.0
@@ -88,10 +99,6 @@ class SymbolService:
         self.doc = doc
         self.gates = gates
 
-    def _layout_block(self, layout_name: str):
-        layout = self.doc.layouts.get(layout_name)
-        return self.doc.blocks.get(layout.block_record_name)
-
     def _block_attdef(self, block_name: str, tag: str):
         if block_name not in self.doc.blocks:
             return None
@@ -111,7 +118,7 @@ class SymbolService:
 
     def _max_sym_suffix_on_layout(self, layout_name: str, pat: re.Pattern[str]) -> int:
         max_n = 0
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         for e in blk:
             if e.dxftype() != "INSERT":
                 continue
@@ -161,9 +168,7 @@ class SymbolService:
         if attdef is None:
             return False
         loc = attdef.dxf.insert
-        dxfattribs: dict = {"height": float(getattr(attdef.dxf, "height", 0.25) or 0.25)}
-        if getattr(attdef.dxf, "rotation", None) is not None:
-            dxfattribs["rotation"] = float(attdef.dxf.rotation)
+        dxfattribs = dxfattribs_for_attrib_from_attdef(attdef)
         if getattr(attdef.dxf, "invisible", None) is not None:
             dxfattribs["invisible"] = int(attdef.dxf.invisible)
         ins.add_attrib(str(attdef.dxf.tag), value, (float(loc.x), float(loc.y)), dxfattribs=dxfattribs)
@@ -172,7 +177,7 @@ class SymbolService:
     def place_symbol(self, layout_name: str, block_name: str, pos: tuple[float, float], ref: str, entity_type: str) -> str:
         if block_name not in self.doc.blocks:
             raise ValueError(f"未定義のブロックです: {block_name!r}")
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         scale = _uniform_scale_for_block(self.doc, block_name)
         logic_cad_log(
             "symbol",
@@ -198,8 +203,6 @@ class SymbolService:
         return uid
 
     def place_and_gate(self, layout_name: str, n_inputs: int, pos: tuple[float, float], ref: str | None = None) -> str:
-        from logic_cad.core.model.constants import MIN_AND_OR_INPUTS
-
         n_inputs = max(MIN_AND_OR_INPUTS, int(n_inputs))
         name = self.gates.ensure_and_block(self.doc, n_inputs)
         if ref is None:
@@ -207,8 +210,6 @@ class SymbolService:
         return self.place_symbol(layout_name, name, pos, ref, "AND")
 
     def place_or_gate(self, layout_name: str, n_inputs: int, pos: tuple[float, float], ref: str | None = None) -> str:
-        from logic_cad.core.model.constants import MIN_AND_OR_INPUTS
-
         n_inputs = max(MIN_AND_OR_INPUTS, int(n_inputs))
         name = self.gates.ensure_or_block(self.doc, n_inputs)
         if ref is None:
@@ -248,7 +249,7 @@ class SymbolService:
         sym = ""
         bname = _page_ref_block_name(self.doc, outgoing=outgoing)
         scale = _uniform_scale_for_block(self.doc, bname)
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ins = blk.add_blockref(bname, pos)
         if scale != 1.0:
             ins.dxf.xscale = scale
@@ -273,7 +274,7 @@ class SymbolService:
             except ezdxf.DXFValueError:
                 self._add_insert_attrib(ins, "SYM", sym)
             try:
-                self.set_attrib_visible(layout_name, uid, "SYM", False)
+                self.set_attrib_visible(layout_name, uid, "SYM", True)
             except ValueError:
                 pass
         if not defer_refresh:
@@ -325,7 +326,7 @@ class SymbolService:
         sym = ""
         bname = _inpage_ref_block_name(outgoing=outgoing)
         scale = _uniform_scale_for_block(self.doc, bname)
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ins = blk.add_blockref(bname, pos)
         if scale != 1.0:
             ins.dxf.xscale = scale
@@ -377,6 +378,86 @@ class SymbolService:
                 a.dxf.height = h
                 return
         raise ValueError("SYM 属性がありません。")
+
+    def set_inpage_ref_link_display(
+        self,
+        layout_name: str,
+        uid: str,
+        *,
+        link_name_auto: bool,
+        display_text: str = "",
+    ) -> None:
+        """Set INPAGE_REF link label mode: auto ※n (among auto pairs) or manual ``sym`` on both ends.
+
+        Args:
+            layout_name: Paper layout containing both INSERTs.
+            uid: One end of the pair (or a lone INSERT when switching to auto).
+            link_name_auto: True to use automatic footnote-style labels; False for manual text.
+            display_text: Manual label (both ends); ignored when *link_name_auto* is True.
+
+        Raises:
+            ValueError: INSERT missing, wrong type, manual mode without a linked peer, or text too long.
+        """
+        u = str(uid or "").strip()
+        if not u:
+            raise ValueError("uid が空です。")
+        ins = self.insert_by_uid(layout_name, u)
+        if ins is None:
+            raise ValueError("INSERT が見つかりません。")
+        if get_type(ins) != ENTITY_TYPE_INPAGE_REF:
+            raise ValueError("インページリンク（INPAGE_REF）ではありません。")
+        prev0 = read_ld_app_dict(ins)
+        peer = str(prev0.get(PEER_UID_XDATA) or "").strip()
+        if link_name_auto:
+            targets = [u]
+            if peer:
+                targets.append(peer)
+            for tid in targets:
+                ent = self.insert_by_uid(layout_name, tid)
+                if ent is None:
+                    raise ValueError("INSERT が見つかりません。")
+                if get_type(ent) != ENTITY_TYPE_INPAGE_REF:
+                    raise ValueError("インページリンク（INPAGE_REF）ではありません。")
+                prev = read_ld_app_dict(ent)
+                uid_str = str(prev.get("uid") or get_uid(ent) or "")
+                if not uid_str:
+                    raise ValueError("INSERT に uid がありません。")
+                extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
+                extra[INPAGE_LINK_NAME_AUTO_XDATA] = "1"
+                tags = build_ld_app_tags("1", uid_str, ENTITY_TYPE_INPAGE_REF, extra)
+                set_entity_xdata(ent, tags)
+            refresh_inpage_ref_syms_on_layout(self.doc, layout_name)
+            return
+        if not peer:
+            raise ValueError(
+                "相手と接続されていないインページリンクには表示文字を手動設定できません。"
+            )
+        peer_ins = self.insert_by_uid(layout_name, peer)
+        if peer_ins is None or get_type(peer_ins) != ENTITY_TYPE_INPAGE_REF:
+            raise ValueError("インページリンクの相手が見つかりません。")
+        text = str(display_text or "")
+        if len(text) > INPAGE_LINK_DISPLAY_MAX_LEN:
+            raise ValueError(
+                f"表示文字は {INPAGE_LINK_DISPLAY_MAX_LEN} 文字以内にしてください（現在 {len(text)} 文字）。"
+            )
+        for tid in (u, peer):
+            ent = self.insert_by_uid(layout_name, tid)
+            if ent is None:
+                raise ValueError("INSERT が見つかりません。")
+            prev = read_ld_app_dict(ent)
+            uid_str = str(prev.get("uid") or get_uid(ent) or "")
+            if not uid_str:
+                raise ValueError("INSERT に uid がありません。")
+            extra = {k: v for k, v in prev.items() if k not in ("ver", "uid", "type")}
+            extra["sym"] = text
+            extra[INPAGE_LINK_NAME_AUTO_XDATA] = "0"
+            tags = build_ld_app_tags("1", uid_str, ENTITY_TYPE_INPAGE_REF, extra)
+            set_entity_xdata(ent, tags)
+            for a in ent.attribs:
+                if str(a.dxf.tag).upper() == "SYM":
+                    a.dxf.text = text
+                    break
+        refresh_inpage_ref_syms_on_layout(self.doc, layout_name)
 
     def link_inpage_ref_pair(self, layout_name: str, from_uid: str, to_uid: str) -> None:
         """Set mutual ``peer_uid`` on both INSERTs and renumber labels."""
@@ -481,10 +562,21 @@ class SymbolService:
         refresh_page_ref_syms_on_layout(self.doc, layout_name)
 
     def insert_by_uid(self, layout_name: str, uid: str) -> Insert | None:
-        layout = self.doc.layouts.get(layout_name)
-        blk = self.doc.blocks.get(layout.block_record_name)
-        from logic_cad.core.model.xdata import get_uid
+        """Return the paper-space ``INSERT`` on *layout_name* whose LD_APP uid matches *uid*.
 
+        Uses :func:`~logic_cad.core.paper_layout_access.paper_layout_block` so layout→block
+        resolution stays consistent with the rest of ``SymbolService``.
+
+        Args:
+            layout_name: Sheet tab name registered in ``doc.layouts``.
+            uid: Entity uid from XDATA.
+
+        Returns:
+            Matching ``INSERT``, or ``None`` when the layout block is missing or no match.
+        """
+        blk = paper_layout_block(self.doc, layout_name)
+        if blk is None:
+            return None
         for e in blk:
             if e.dxftype() == "INSERT" and get_uid(e) == uid:
                 return e
@@ -545,6 +637,8 @@ class SymbolService:
             raise ValueError("INSERT が見つかりません。")
         if not ins.attribs:
             ins.dxf.insert = pos
+            if get_type(ins) in ("AND", "OR"):
+                self.sync_gate_stub_arrows_dxf(layout_name, uid)
             return
         prev = read_ld_app_dict(ins)
         uid_str = prev.get("uid") or get_uid(ins) or new_uid()
@@ -557,7 +651,7 @@ class SymbolService:
         rot = float(ins.dxf.rotation)
         xs, ys = float(ins.dxf.xscale), float(ins.dxf.yscale)
         zs = float(ins.dxf.zscale)
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         for a in list(ins.attribs):
             self.doc.entitydb.delete_entity(a)
         self.doc.entitydb.delete_entity(ins)
@@ -599,23 +693,135 @@ class SymbolService:
             refresh_inpage_ref_syms_on_layout(self.doc, layout_name)
         elif t == "PAGE_REF":
             refresh_page_ref_syms_on_layout(self.doc, layout_name)
+        if t in ("AND", "OR"):
+            self.sync_gate_stub_arrows_dxf(layout_name, uid_str)
 
     def rotate_insert_relative_deg(self, layout_name: str, uid: str, delta_degrees: float) -> None:
         ins = self.insert_by_uid(layout_name, uid)
         if ins is None:
             raise ValueError("INSERT が見つかりません。")
         ins.dxf.rotation = float(ins.dxf.rotation) + float(delta_degrees)
+        if get_type(ins) in ("AND", "OR"):
+            self.sync_gate_stub_arrows_dxf(layout_name, uid)
+
+    def _iter_gate_stub_arrow_entities(self, layout_name: str, gate_uid: str):
+        blk = paper_layout_block(self.doc, layout_name)
+        if blk is None:
+            return
+        for e in blk:
+            if e.dxftype() != "LWPOLYLINE":
+                continue
+            if str(e.dxf.layer) != LAYER_SYMBOL:
+                continue
+            if get_type(e) != ENTITY_TYPE_GATE_INPUT_STUB_ARROW:
+                continue
+            xd = read_ld_app_dict(e)
+            if str(xd.get(GATE_STUB_ARROW_PARENT_XDATA) or "").strip() == gate_uid:
+                yield e
+
+    def remove_gate_stub_arrow_children(self, layout_name: str, gate_uid: str) -> None:
+        """Delete layout-space GATE_INPUT_STUB_ARROW polylines owned by this gate INSERT."""
+        for ent in list(self._iter_gate_stub_arrow_entities(layout_name, gate_uid)):
+            self.doc.entitydb.delete_entity(ent)
+
+    def sync_gate_stub_arrows_dxf(self, layout_name: str, gate_uid: str) -> None:
+        """Create, update, or remove GATE_INPUT_STUB_ARROW geometry from INSERT state and XDATA flag.
+
+        Arrows mirror :func:`~logic_cad.core.routing.wire_arrow_geometry.wire_in_arrow_wing_points_xyb`
+        on each stub segment in block-local space, transformed by the INSERT matrix (PDF/DXF-visible).
+        """
+        ins = self.insert_by_uid(layout_name, gate_uid)
+        blk = paper_layout_block(self.doc, layout_name)
+        existing = list(self._iter_gate_stub_arrow_entities(layout_name, gate_uid))
+
+        def _purge_existing() -> None:
+            for ent in existing:
+                self.doc.entitydb.delete_entity(ent)
+
+        if blk is None or ins is None:
+            _purge_existing()
+            return
+
+        entity_t = get_type(ins)
+        if entity_t not in ("AND", "OR"):
+            _purge_existing()
+            return
+
+        gate_meta = read_ld_app_dict(ins)
+        if str(gate_meta.get(GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW) or "") != "1":
+            _purge_existing()
+            return
+
+        g_geom = gate_view_geometry_from_block_name(str(ins.dxf.name))
+        if g_geom is None:
+            _purge_existing()
+            return
+
+        mat = ins.matrix44()
+        by_stub: dict[int, object] = {}
+        for ent in existing:
+            xd = read_ld_app_dict(ent)
+            raw = str(xd.get(GATE_STUB_ARROW_INDEX_XDATA) or "").strip()
+            try:
+                idx = int(raw)
+            except ValueError:
+                continue
+            if idx < 0:
+                continue
+            by_stub.setdefault(idx, ent)
+
+        used_handles: set[str] = set()
+
+        for i, yi in enumerate(g_geom.stub_ys):
+            tri = wire_in_arrow_wing_points_xyb([(0.0, float(yi), 0.0), (float(g_geom.xL), float(yi), 0.0)])
+            if tri is None:
+                continue
+            pts_xy: list[tuple[float, float]] = []
+            for ax, ay in tri:
+                w = mat.transform(Vec3(float(ax), float(ay), 0.0))
+                pts_xy.append((float(w.x), float(w.y)))
+
+            if len(pts_xy) < 3:
+                continue
+
+            ent = by_stub.get(i)
+            if ent is not None and ent.dxftype() == "LWPOLYLINE":
+                ent.set_points([(float(x), float(y)) for x, y in pts_xy], format="xy")
+                ent.dxf.layer = LAYER_SYMBOL
+                ent.dxf.linetype = LINETYPE_CONTINUOUS
+                used_handles.add(str(ent.dxf.handle))
+                continue
+
+            lw = blk.add_lwpolyline(
+                [(float(x), float(y)) for x, y in pts_xy],
+                dxfattribs={"layer": LAYER_SYMBOL, "linetype": LINETYPE_CONTINUOUS},
+            )
+            arrow_uid = new_uid()
+            set_entity_xdata(
+                lw,
+                build_ld_app_tags(
+                    "1",
+                    arrow_uid,
+                    ENTITY_TYPE_GATE_INPUT_STUB_ARROW,
+                    {
+                        GATE_STUB_ARROW_PARENT_XDATA: gate_uid,
+                        GATE_STUB_ARROW_INDEX_XDATA: str(i),
+                    },
+                ),
+            )
+            used_handles.add(str(lw.dxf.handle))
+
+        for ent in existing:
+            hs = str(getattr(ent.dxf, "handle", "") or "")
+            if hs not in used_handles:
+                self.doc.entitydb.delete_entity(ent)
 
     def change_gate_inputs(self, layout_name: str, uid: str, new_n: int) -> None:
-        from logic_cad.core.model.constants import MIN_AND_OR_INPUTS
-
         if int(new_n) < MIN_AND_OR_INPUTS:
             raise ValueError(f"AND/OR ゲートには入力が少なくとも {MIN_AND_OR_INPUTS} 本必要です。")
         ins = self.insert_by_uid(layout_name, uid)
         if ins is None:
             raise ValueError("INSERT が見つかりません。")
-        from logic_cad.core.model.xdata import get_type, read_ld_app_dict
-
         t = get_type(ins)
         if t == "AND":
             new_block = self.gates.ensure_and_block(self.doc, new_n)
@@ -634,7 +840,7 @@ class SymbolService:
         for a in list(ins.attribs):
             self.doc.entitydb.delete_entity(a)
         self.doc.entitydb.delete_entity(ins)
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         new_ins = blk.add_blockref(new_block, pos)
         new_ins.dxf.rotation = rot
         new_ins.dxf.xscale = xs
@@ -657,9 +863,12 @@ class SymbolService:
             inv = vis_by_u.get(str(a.dxf.tag).upper())
             if inv is not None:
                 a.dxf.invisible = inv
+        self.sync_gate_stub_arrows_dxf(layout_name, uid_str)
 
     def set_gate_show_input_stub_in_arrow(self, layout_name: str, uid: str, show: bool) -> None:
-        """Persist stub-root arrow display on an AND/OR INSERT (Qt paint; same wing geometry as WIRE IN arrow).
+        """Persist stub-root arrows on layout as GATE_INPUT_STUB_ARROW LW polylines (PDF/DXF).
+
+        Uses the same wing geometry as WIRE IN arrows; positions follow the INSERT transform.
 
         Args:
             layout_name: Active paper layout name.
@@ -688,6 +897,7 @@ class SymbolService:
             extra.pop(GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW, None)
         tags = build_ld_app_tags(ver, uid_str, str(t), extra)
         set_entity_xdata(ins, tags)
+        self.sync_gate_stub_arrows_dxf(layout_name, uid_str)
 
     def clipboard_record_for_insert(self, layout_name: str, uid: str) -> SymbolCopyRecord | None:
         ins = self.insert_by_uid(layout_name, uid)
@@ -748,7 +958,7 @@ class SymbolService:
                 block_name = ensured
         if block_name not in self.doc.blocks:
             raise ValueError(f"未定義のブロックです: {rec.block_name!r}")
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         ins = blk.add_blockref(block_name, pos)
         ins.dxf.rotation = float(rec.rotation)
         ins.dxf.xscale = float(rec.xscale)
@@ -793,4 +1003,6 @@ class SymbolService:
                     "symbol",
                     f"paste_insert_from_clipboard: could not set fresh SYM for uid={nu} block={block_name!r}",
                 )
+        if get_type(ins) in ("AND", "OR"):
+            self.sync_gate_stub_arrows_dxf(layout_name, nu)
         return nu

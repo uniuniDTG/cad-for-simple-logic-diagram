@@ -4,6 +4,7 @@ from collections import defaultdict
 
 from logic_cad.core.model.constants import BRIDGE_RADIUS, LAYER_WIRE_BRIDGE
 from logic_cad.core.model.xdata import get_type, get_uid
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.routing import (
     apply_vertical_semijumps_to_xyb,
     horizontal_segment_goes_east,
@@ -16,7 +17,7 @@ from logic_cad.core.routing.wire_polyline_geometry import _vertical_segment_wire
 
 class WireServiceBridgeMixin:
     def clear_wire_bridges(self, layout_name: str) -> None:
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         to_del = []
         for e in blk:
             if e.dxftype() == "ARC" and e.dxf.layer == LAYER_WIRE_BRIDGE:

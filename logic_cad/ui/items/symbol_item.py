@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsItem,
@@ -35,7 +35,6 @@ from logic_cad.core.model.constants import (
     GATE_STATIC_TEXT_HEIGHT_OR_MM,
     WIRE_BRANCH_RADIUS_MM,
 )
-from logic_cad.core.routing.wire_arrow_geometry import wire_in_arrow_wing_points_xyb
 from logic_cad.ui.block_paint import (
     block_has_sym_attdef,
     block_scaled_bounds_with_instance,
@@ -82,7 +81,6 @@ class SymbolItem(QGraphicsItem):
         scale_x: float = 1.0,
         scale_y: float = 1.0,
         instance_attribs: dict[str, tuple[str, bool]] | None = None,
-        show_input_stub_in_arrow: bool = False,
         inpage_sym_height_mm: float | None = None,
         page_ref_target_broken: bool = False,
         parent=None,
@@ -118,7 +116,6 @@ class SymbolItem(QGraphicsItem):
         self._bounds = QRectF()
         # WIRE_BRANCH: white when incident wire count is 3+, otherwise red.
         self._wire_branch_ready = False
-        self._show_input_stub_in_arrow = bool(show_input_stub_in_arrow)
         self._inpage_sym_height_mm = inpage_sym_height_mm
         self._page_ref_target_broken = bool(page_ref_target_broken)
         self._rebuild_geometry(index)
@@ -241,34 +238,6 @@ class SymbolItem(QGraphicsItem):
         painter.drawLine(bl(g.xR, g.y_sq_B), bl(g.xR, g.y_sq_T))
         painter.drawLine(bl(g.xR, g.mid_y), bl(g.x_out, g.mid_y))
 
-    def _paint_gate_stub_in_arrows(self, painter: QPainter, g: GateViewGeometry) -> None:
-        """Draw WIRE-style IN arrow heads at each input stub root (vertical bar), not at port tips.
-
-        Args:
-            painter: Active painter (item coordinates; rotation applied by the item).
-            g: Dynamic AND/OR geometry; uses ``stub_ys`` and ``xL`` for stub polylines.
-
-        Returns:
-            None
-        """
-        pen = QPen(QColor(200, 200, 210), 0)
-        pen.setCosmetic(True)
-        # Input-stub arrowheads are always rendered as solid lines, independent of wire style.
-        pen.setStyle(Qt.PenStyle.SolidLine)
-        pen.setDashPattern([])
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        for yi in g.stub_ys:
-            tri = wire_in_arrow_wing_points_xyb([(0.0, yi, 0.0), (g.xL, yi, 0.0)])
-            if tri is None:
-                continue
-            a_pt, p_pt, b_pt = tri
-            path = QPainterPath()
-            path.moveTo(dxf_to_scene(*a_pt))
-            path.lineTo(dxf_to_scene(*p_pt))
-            path.lineTo(dxf_to_scene(*b_pt))
-            painter.drawPath(path)
-
     def paint(
         self,
         painter: QPainter,
@@ -381,8 +350,6 @@ class SymbolItem(QGraphicsItem):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             if self._gate_geom is not None:
                 self._paint_gate_body(painter, self._gate_geom)
-                if self._show_input_stub_in_arrow and self.entity_type in ("AND", "OR"):
-                    self._paint_gate_stub_in_arrows(painter, self._gate_geom)
             elif (
                 self._doc is not None
                 and self._insert_block_name

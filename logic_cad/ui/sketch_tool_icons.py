@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap, QPolygonF
 
@@ -83,21 +85,86 @@ def sketch_circle_icon(*, size: int = 26) -> QIcon:
     return QIcon(pm)
 
 
+def sketch_arc_icon(*, size: int = 26) -> QIcon:
+    """Circular arc with three vertex markers — three-point arc tool."""
+    pm = _pixmap(size)
+    painter = QPainter(pm)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    m = max(4, size // 6)
+    rect_w = size - 2 * m
+    # CCW arc along the top of the ellipse (Qt: 0° = 3 o'clock, angles in 1/16°)
+    start_16 = int(180 * 16)
+    span_16 = int(-140 * 16)
+    painter.setPen(_pen())
+    painter.drawArc(m, m, rect_w, rect_w, start_16, span_16)
+    dim = _pen(100, 180, 220, 1.4)
+    painter.setPen(dim)
+    cx = float(size) / 2.0
+    cy = float(size) / 2.0
+    r = float(rect_w) / 2.0
+    for ang_deg in (200.0, 270.0, 340.0):
+        rad = math.radians(ang_deg)
+        x = cx + r * 0.92 * math.cos(rad)
+        y = cy - r * 0.92 * math.sin(rad)
+        _endpoint_square(painter, x, y, 1.8)
+    painter.end()
+    return QIcon(pm)
+
+
+def _draw_t_and_baseline_in_content_box(
+    p: QPainter, left: float, top: float, right: float, bottom: float
+) -> None:
+    r"""Draw CAD-style ``T`` and baseline inside the content rectangle.
+
+    Used by :func:`sketch_text_icon` and :func:`sketch_attdef_icon` so both glyphs match.
+
+    Args:
+        p: Active painter (this function sets pen color/width).
+        left: Content left edge (px).
+        top: Content top edge (px).
+        right: Content right edge (px).
+        bottom: Content bottom edge (px).
+    """
+
+    cx = 0.5 * (left + right)
+    span = right - left
+    hw = max(2.5, span * 0.36)
+    t_top = top + (bottom - top) * 0.14
+    t_bot = bottom - (bottom - top) * 0.28
+    p.setPen(_pen())
+    p.drawLine(QPointF(cx - hw, t_top), QPointF(cx + hw, t_top))
+    p.drawLine(QPointF(cx, t_top), QPointF(cx, t_bot))
+    p.setPen(_pen(100, 180, 220, 1.0))
+    p.drawLine(QPointF(left + 0.5, bottom - 1.0), QPointF(right - 0.5, bottom - 1.0))
+
+
+def _content_box_for_text_like_icon(size: int) -> tuple[float, float, float, float]:
+    """Return the inset content box (same as inside the ATTDEF outer frame).
+
+    Args:
+        size: Icon width/height in pixels.
+
+    Returns:
+        ``(left, top, right, bottom)`` in pixel coordinates.
+    """
+
+    m = max(3, size // 7)
+    inset = max(2.0, float(size) / 12.0)
+    left = float(m) + inset
+    right = float(size - m) - inset
+    top = float(m) + inset
+    bottom = float(size - m) - inset
+    return left, top, right, bottom
+
+
 def sketch_text_icon(*, size: int = 26) -> QIcon:
-    """'T' glyph with baseline — CAD text placement tool."""
+    """Plain TEXT: same T+baseline geometry as inside :func:`sketch_attdef_icon`, without frame."""
+
     pm = _pixmap(size)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(_pen())
-    top = max(4, size // 5)
-    bot = size - max(4, size // 6)
-    cx = size / 2.0
-    hw = max(5, size // 3)
-    p.drawLine(QPointF(cx - hw, top), QPointF(cx + hw, top))
-    p.drawLine(QPointF(cx, top), QPointF(cx, bot))
-    base_pen = _pen(100, 180, 220, 1.0)
-    p.setPen(base_pen)
-    p.drawLine(QPointF(cx - hw - 1, bot + 2), QPointF(cx + hw + 1, bot + 2))
+    left, top, right, bottom = _content_box_for_text_like_icon(size)
+    _draw_t_and_baseline_in_content_box(p, left, top, right, bottom)
     p.end()
     return QIcon(pm)
 
@@ -108,23 +175,11 @@ def sketch_attdef_icon(*, size: int = 26) -> QIcon:
     pm = _pixmap(size)
     p = QPainter(pm)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(_pen())
     m = max(3, size // 7)
+    p.setPen(_pen())
     p.drawRect(int(m), int(m), int(size - 2 * m), int(size - 2 * m))
-    inset = max(2.0, float(size) / 12.0)
-    left = float(m) + inset
-    right = float(size - m) - inset
-    top = float(m) + inset
-    bottom = float(size - m) - inset
-    cx = 0.5 * (left + right)
-    span = right - left
-    hw = max(2.5, span * 0.36)
-    t_top = top + (bottom - top) * 0.14
-    t_bot = bottom - (bottom - top) * 0.28
-    p.drawLine(QPointF(cx - hw, t_top), QPointF(cx + hw, t_top))
-    p.drawLine(QPointF(cx, t_top), QPointF(cx, t_bot))
-    p.setPen(_pen(100, 180, 220, 1.0))
-    p.drawLine(QPointF(left + 0.5, bottom - 1.0), QPointF(right - 0.5, bottom - 1.0))
+    left, top, right, bottom = _content_box_for_text_like_icon(size)
+    _draw_t_and_baseline_in_content_box(p, left, top, right, bottom)
     p.end()
     return QIcon(pm)
 

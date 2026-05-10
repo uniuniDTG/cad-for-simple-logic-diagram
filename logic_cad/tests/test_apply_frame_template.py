@@ -13,6 +13,7 @@ from logic_cad.core.model.constants import (
     LAYER_FRAME,
     LAYER_FRAME_TEXT,
 )
+from logic_cad.core.model.xdata import get_type
 from logic_cad.core.pages.page_order import list_paper_layout_names_sorted
 from logic_cad.core.services.layout_service import apply_frame_template_from_path, validate_frame_template_path
 
@@ -39,8 +40,6 @@ def _write_minimal_frame_template(path: Path, dwg_attdef_text: str) -> None:
 
 
 def _count_paper_frame_inserts(doc: ezdxf.Drawing) -> int:
-    from logic_cad.core.model.xdata import get_type
-
     n = 0
     for layout in doc.layouts:
         if layout.is_modelspace:

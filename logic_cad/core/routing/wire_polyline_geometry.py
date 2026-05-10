@@ -6,6 +6,11 @@ import math
 
 from ezdxf.math import Vec2, bulge_to_arc
 
+from logic_cad.core.geometry.manhattan_metrics import (
+    points_close_xy,
+    segment_is_axis_aligned,
+    segment_is_vertical,
+)
 from logic_cad.core.model.constants import (
     GRID_PITCH,
     WIRE_BRANCH_ARC_END_CLAMP_FRAC,
@@ -41,32 +46,25 @@ def _vertical_segment_wire_uid(
     for uid, pts in ((ui, pi), (uj, pj)):
         for k in range(len(pts) - 1):
             p0, p1 = pts[k], pts[k + 1]
-            if abs(p0[0] - p1[0]) > MANHATTAN_EPS:
+            if not segment_is_vertical(p0, p1, MANHATTAN_EPS):
                 continue
             if (_near_pt(p0, v0) and _near_pt(p1, v1)) or (_near_pt(p0, v1) and _near_pt(p1, v0)):
                 return uid
     return None
 
 
-def _segment_axis_aligned(a: tuple[float, float], b: tuple[float, float]) -> bool:
-    return abs(a[0] - b[0]) < MANHATTAN_EPS or abs(a[1] - b[1]) < MANHATTAN_EPS
-
-
 def _polyline_is_manhattan(pts: list[tuple[float, float]]) -> bool:
     if len(pts) < 2:
         return True
     for i in range(len(pts) - 1):
-        if not _segment_axis_aligned(pts[i], pts[i + 1]):
+        if not segment_is_axis_aligned(pts[i], pts[i + 1], MANHATTAN_EPS):
             return False
     return True
 
 
 def _polyline_no_zero_segments(pts: list[tuple[float, float]]) -> bool:
     for i in range(len(pts) - 1):
-        if (
-            abs(pts[i][0] - pts[i + 1][0]) < MANHATTAN_EPS
-            and abs(pts[i][1] - pts[i + 1][1]) < MANHATTAN_EPS
-        ):
+        if points_close_xy(pts[i], pts[i + 1], MANHATTAN_EPS):
             return False
     return True
 
@@ -371,14 +369,6 @@ def offset_polyline_segment_parallel(
 
 def _dist_mm(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
-
-
-def _is_manhattan_polyline(pts: list[tuple[float, float]]) -> bool:
-    for i in range(len(pts) - 1):
-        a, b = pts[i], pts[i + 1]
-        if abs(a[0] - b[0]) > 1e-9 and abs(a[1] - b[1]) > 1e-9:
-            return False
-    return True
 
 
 def _lwpolyline_vertices(e) -> list[tuple[float, float]]:

@@ -6,6 +6,9 @@ import ezdxf
 
 from logic_cad.core.model.constants import (
     LAYER_ANNOTATION,
+    LAYER_USER_ARC_CENTER,
+    LAYER_USER_ARC_CONTINUOUS,
+    LAYER_USER_ARC_DASHED,
     LAYER_USER_CIRCLE_CENTER,
     LAYER_USER_CIRCLE_CONTINUOUS,
     LAYER_USER_CIRCLE_DASHED,
@@ -23,6 +26,7 @@ from logic_cad.core.model.user_sketch_layers import (
     USER_SKETCH_WIRE_LAYERS,
     is_user_sketch_wire_layer,
     normalize_user_sketch_linetype,
+    user_sketch_arc_layer_for_linetype,
     user_sketch_circle_layer_for_linetype,
     user_sketch_cloud_layer_for_linetype,
     user_sketch_display_linetype_for_entity,
@@ -43,6 +47,9 @@ def test_user_sketch_wire_layers_set() -> None:
             LAYER_USER_CLOUD_CONTINUOUS,
             LAYER_USER_CLOUD_CENTER,
             LAYER_USER_CLOUD_DASHED,
+            LAYER_USER_ARC_CONTINUOUS,
+            LAYER_USER_ARC_CENTER,
+            LAYER_USER_ARC_DASHED,
         }
     )
 
@@ -69,9 +76,17 @@ def test_user_sketch_cloud_layer_for_linetype() -> None:
     assert user_sketch_cloud_layer_for_linetype("DASHED") == LAYER_USER_CLOUD_DASHED
 
 
+def test_user_sketch_arc_layer_for_linetype() -> None:
+    """ARC layers map CONTINUOUS / CENTER / DASHED to LD_USER_ARC_*."""
+    assert user_sketch_arc_layer_for_linetype("CONTINUOUS") == LAYER_USER_ARC_CONTINUOUS
+    assert user_sketch_arc_layer_for_linetype("CENTER") == LAYER_USER_ARC_CENTER
+    assert user_sketch_arc_layer_for_linetype("DASHED") == LAYER_USER_ARC_DASHED
+
+
 def test_is_user_sketch_wire_layer() -> None:
     """Layer name classification."""
     assert is_user_sketch_wire_layer(LAYER_USER_LINE_CONTINUOUS) is True
+    assert is_user_sketch_wire_layer(LAYER_USER_ARC_DASHED) is True
     assert is_user_sketch_wire_layer(LAYER_ANNOTATION) is False
 
 

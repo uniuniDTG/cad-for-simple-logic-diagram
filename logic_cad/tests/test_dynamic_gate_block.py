@@ -2,6 +2,8 @@
 
 from logic_cad.core.logic_diagram import LogicDiagram
 from logic_cad.core.model.constants import (
+    GATE_STATIC_LABEL_AND,
+    GATE_STATIC_LABEL_OR,
     GATE_STATIC_TEXT_HEIGHT_AND_MM,
     GATE_STATIC_TEXT_HEIGHT_OR_MM,
 )
@@ -23,7 +25,7 @@ def test_and_block_name_and_ports():
     assert "LD_PORT_IN2_LOGIC" in layers
     assert "LD_PORT_OUT0_LOGIC" in layers
     static = [e for e in blk if e.dxftype() == "ATTDEF" and e.dxf.tag == "STATIC_LABEL0"]
-    assert static and static[0].dxf.text == "&"
+    assert static and static[0].dxf.text == GATE_STATIC_LABEL_AND
     sym = [e for e in blk if e.dxftype() == "ATTDEF" and e.dxf.tag == "SYM"]
     assert sym and sym[0].dxf.text == "AND_3"
     assert float(sym[0].dxf.height) == GATE_SYM_TEXT_HEIGHT_MM
@@ -44,7 +46,7 @@ def test_or_block_reuse_and_topology():
     assert "LD_PORT_IN1_LOGIC" in layers
     assert "LD_PORT_OUT0_LOGIC" in layers
     static = [e for e in blk if e.dxftype() == "ATTDEF" and e.dxf.tag == "STATIC_LABEL0"]
-    assert static and static[0].dxf.text == "≥1"
+    assert static and static[0].dxf.text == GATE_STATIC_LABEL_OR
     assert float(static[0].dxf.height) == GATE_STATIC_TEXT_HEIGHT_OR_MM
     sym = [e for e in blk if e.dxftype() == "ATTDEF" and e.dxf.tag == "SYM"]
     assert sym and sym[0].dxf.text == "OR_2"

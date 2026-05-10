@@ -14,8 +14,8 @@ APPID_DOC = "LD_DOC"
 # Dynamic AND/OR blocks: minimum number of inputs (no AND_1/OR_1 for new placements or shrink).
 MIN_AND_OR_INPUTS = 2
 # IEC-style static labels shown inside gate symbols.
-GATE_STATIC_LABEL_AND = "&"
-GATE_STATIC_LABEL_OR = "≥1"
+GATE_STATIC_LABEL_AND = "A"
+GATE_STATIC_LABEL_OR = "O"
 # STATIC_LABEL0 ATTDEF height (drawing units = mm); AND/OR gate symbols in dynamic_gate_factory.
 GATE_STATIC_TEXT_HEIGHT_AND_MM = 2.5
 GATE_STATIC_TEXT_HEIGHT_OR_MM = 2.5
@@ -48,6 +48,9 @@ LAYER_USER_CIRCLE_DASHED = "LD_USER_CIRCLE_DASHED"
 LAYER_USER_CLOUD_CONTINUOUS = "LD_USER_CLOUD_CONTINUOUS"
 LAYER_USER_CLOUD_CENTER = "LD_USER_CLOUD_CENTER"
 LAYER_USER_CLOUD_DASHED = "LD_USER_CLOUD_DASHED"
+LAYER_USER_ARC_CONTINUOUS = "LD_USER_ARC_CONTINUOUS"
+LAYER_USER_ARC_CENTER = "LD_USER_ARC_CENTER"
+LAYER_USER_ARC_DASHED = "LD_USER_ARC_DASHED"
 LAYER_FRAME = "LD_FRAME"
 LAYER_FRAME_TEXT = "LD_FRAME_TEXT"
 LAYER_VPORT = "LD_VPORT"
@@ -86,6 +89,10 @@ INPAGE_MARKER_PREFIX = "※"
 INPAGE_SYM_HEIGHT_MM = 2.5
 # LD_APP XDATA: optional per-INSERT SYM text height (mm); string for build_ld_app_tags
 INPAGE_SYM_HEIGHT_XDATA = "sym_height_mm"
+# INPAGE_REF: "1" / omitted = auto footnote labels (※1… among auto pairs only); "0" = manual link display in ``sym``
+INPAGE_LINK_NAME_AUTO_XDATA = "inpage_link_name_auto"
+# Max length for manual INPAGE link display (``sym``) from the property panel.
+INPAGE_LINK_DISPLAY_MAX_LEN = 64
 # Vertical offset (mm) for SYM ATTDEF insert: negative Y moves text downward on the sheet (DXF Y up).
 INPAGE_SYM_INSERT_DY_MM = -1.0
 # Minimal blocks: ports + SYM only; horizontal span for TO-side port + right-aligned text (mm)
@@ -107,6 +114,7 @@ ENTITY_TYPE_TOC_ROW = "TOC_ROW"
 ENTITY_TYPE_USER_LINE = "USER_LINE"
 ENTITY_TYPE_USER_CIRCLE = "USER_CIRCLE"
 ENTITY_TYPE_USER_CLOUD = "USER_CLOUD"
+ENTITY_TYPE_USER_ARC = "USER_ARC"
 ENTITY_TYPE_USER_TEXT = "USER_TEXT"
 # Wire branch: INSERT of ``LD_WIRE_BRANCH`` (ports + optional circle in block); XDATA type WIRE_BRANCH.
 BLOCK_WIRE_BRANCH = "LD_WIRE_BRANCH"
@@ -151,6 +159,9 @@ ALL_LAYERS = (
     LAYER_USER_CLOUD_CONTINUOUS,
     LAYER_USER_CLOUD_CENTER,
     LAYER_USER_CLOUD_DASHED,
+    LAYER_USER_ARC_CONTINUOUS,
+    LAYER_USER_ARC_CENTER,
+    LAYER_USER_ARC_DASHED,
     LAYER_FRAME,
     LAYER_FRAME_TEXT,
     LAYER_VPORT,
@@ -275,6 +286,22 @@ LINETYPE_CONTINUOUS = "CONTINUOUS"
 LINETYPE_DASH = "DASHED"
 LINETYPE_CENTER = "CENTER"
 
+# DXF/PDF simple linetype ``DASHED``: one dash + one gap per cycle (drawing units = mm).
+# Applied on every ``ensure_standard_linetypes`` so LTYPE matches PDF and saved files.
+LINETYPE_DASHED_DASH_MM = 1.5
+LINETYPE_DASHED_GAP_MM = 0.75
+
+# DXF/PDF ``CENTER``: long dash, gap, short dash, gap (same geometry as frame_template.dxf).
+LINETYPE_CENTER_LONG_DASH_MM = 3.175
+LINETYPE_CENTER_GAP1_MM = 0.635
+LINETYPE_CENTER_SHORT_DASH_MM = 0.635
+LINETYPE_CENTER_GAP2_MM = 0.635
+
+# Qt canvas only (QPen::setDashPattern): lengths are in pen-width units, not mm.
+# ``DASH_PATTERN`` dash:gap ratio matches ``LINETYPE_DASHED_DASH_MM`` : ``LINETYPE_DASHED_GAP_MM``.
+CENTER_DASH_PATTERN: list[float] = [20.0, 4.0, 4.0, 4.0]
+DASH_PATTERN: list[float] = [10.0, 5.0]
+
 # WIRE end (IN side) arrow head: child LWPOLYLINE type WIRE_ARROW; wing offsets in DXF mm.
 ENTITY_TYPE_WIRE_ARROW = "WIRE_ARROW"
 WIRE_ARROW_BACK_MM = 2.0
@@ -285,3 +312,7 @@ WIRE_XDATA_SHOW_IN_ARROW = "show_in_arrow"
 WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS = "allow_orthogonal_cross"
 # AND/OR INSERT XDATA extra: "1" draws WIRE-style IN arrow at each input stub root (x = STUB_MM); absent = off.
 GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW = "show_input_stub_in_arrow"
+# Child LWPOLYLINE on LAYER_SYMBOL (layout space); wing geometry matches WIRE IN arrow.
+ENTITY_TYPE_GATE_INPUT_STUB_ARROW = "GATE_INPUT_STUB_ARROW"
+GATE_STUB_ARROW_PARENT_XDATA = "gate"
+GATE_STUB_ARROW_INDEX_XDATA = "stub"

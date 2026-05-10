@@ -18,21 +18,20 @@ from logic_cad.core.model.wire_port_helpers import (
     wire_skips_auto_reroute,
 )
 from logic_cad.core.model.xdata import build_ld_app_tags, get_type, get_uid, new_uid, read_ld_app_dict, set_entity_xdata
-from logic_cad.core.obstacles import (
-    build_routing_obstacles,
-    build_symbol_only_routing_obstacles,
-    reserved_path_obstacles,
-)
-from logic_cad.core.routing import (
+from logic_cad.core.paper_layout_access import paper_layout_block
+from logic_cad.core.routing.wire_routing_from_document import (
     DEFAULT_ROUTING_PROFILE,
     RoutingProfile,
+    build_routing_obstacles,
+    build_symbol_only_routing_obstacles,
     dedupe_colinear,
+    reserved_path_obstacles,
     route_manhattan_with_escape,
     snap_to_grid,
 )
 from logic_cad.core.routing.wire_polyline_geometry import (
     MANHATTAN_EPS as _PARALLEL_MOVE_EPS,
-    _is_manhattan_polyline,
+    _polyline_is_manhattan,
 )
 from logic_cad.core.services.wire_service.gate_profile import _GATE_CONNECT_OPTIMIZE_PROFILE
 from logic_cad.core.graph.port_src_dst_solver import (
@@ -243,11 +242,11 @@ class WireServiceConnectionMixin:
             pts.append(p1)
         if len(pts) < 2:
             raise ValueError("配線パスが短すぎます。")
-        if not _is_manhattan_polyline(pts):
+        if not _polyline_is_manhattan(pts):
             raise ValueError("マンハッタン以外の折れは使えません（水平／垂直のみ）")
         pts = dedupe_colinear(pts)
 
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         wire_layer = layer_for_wire_unit(wunit)
         lw = blk.add_lwpolyline(pts, dxfattribs={"layer": wire_layer})
         uid = new_uid()
@@ -308,7 +307,7 @@ class WireServiceConnectionMixin:
         wunit = resolve_wire_unit(ua, ub)
         n_gate = _and_or_input_count(index, dst_uid)
         if n_gate is not None and _port_index(dst_port) is not None:
-            blk = self._layout_block(layout_name)
+            blk = paper_layout_block(self.doc, layout_name)
             wire_layer = layer_for_wire_unit(wunit)
             mid = (p1[0], p0[1])
             placeholder = [p0, mid, p1] if abs(p0[0] - p1[0]) > 1e-9 and abs(p0[1] - p1[1]) > 1e-9 else [p0, p1]
@@ -349,7 +348,7 @@ class WireServiceConnectionMixin:
         )
         pts = self._append_port_segment(pts, p1)
         pts = self._normalize_auto_route_points(pts, p0, p1)
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         wire_layer = layer_for_wire_unit(wunit)
         lw = blk.add_lwpolyline(pts, dxfattribs={"layer": wire_layer})
         uid = new_uid()

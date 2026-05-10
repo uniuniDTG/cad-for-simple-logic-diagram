@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from logic_cad.core.geometry.manhattan_metrics import (
+    manhattan_distance_via,
+    points_close_xy,
+    segment_is_axis_aligned,
+)
 from logic_cad.core.model.constants import GRID_PITCH
 
 
@@ -44,18 +49,18 @@ def ensure_manhattan_polyline(
     for i in range(1, len(pts)):
         a = out[-1]
         b = snap_to_grid(*pts[i], pitch)
-        if abs(a[0] - b[0]) < 1e-9 and abs(a[1] - b[1]) < 1e-9:
+        if points_close_xy(a, b):
             continue
-        if abs(a[0] - b[0]) < 1e-9 or abs(a[1] - b[1]) < 1e-9:
+        if segment_is_axis_aligned(a, b):
             out.append(b)
             continue
         mid1 = snap_to_grid(b[0], a[1], pitch)
         mid2 = snap_to_grid(a[0], b[1], pitch)
-        m1 = abs(mid1[0] - a[0]) + abs(mid1[1] - a[1]) + abs(b[0] - mid1[0]) + abs(b[1] - mid1[1])
-        m2 = abs(mid2[0] - a[0]) + abs(mid2[1] - a[1]) + abs(b[0] - mid2[0]) + abs(b[1] - mid2[1])
+        m1 = manhattan_distance_via(a, mid1, b)
+        m2 = manhattan_distance_via(a, mid2, b)
         mid = mid1 if m1 <= m2 else mid2
-        if abs(mid[0] - a[0]) > 1e-9 or abs(mid[1] - a[1]) > 1e-9:
+        if not points_close_xy(mid, a):
             out.append(mid)
-        if abs(b[0] - out[-1][0]) > 1e-9 or abs(b[1] - out[-1][1]) > 1e-9:
+        if not points_close_xy(b, out[-1]):
             out.append(b)
     return dedupe_colinear(out)

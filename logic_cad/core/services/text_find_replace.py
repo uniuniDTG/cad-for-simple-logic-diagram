@@ -16,6 +16,7 @@ from logic_cad.core.model.constants import (
     USER_TEXT_DEFAULT_HEIGHT_MM,
 )
 from logic_cad.core.model.xdata import get_type, get_uid
+from logic_cad.core.paper_layout_access import paper_layout_block
 
 # PAGE_REF uses literal "PAGE_REF" in XDATA; there is no ENTITY_TYPE constant in :mod:`constants`.
 _SKIP_SYMBOL_TYPES: frozenset[str] = frozenset(
@@ -73,10 +74,9 @@ def list_text_search_hits(
         layout = doc.layouts.get(layout_name)
         if layout is None or layout.is_modelspace:
             continue
-        br_name = layout.block_record_name
-        if br_name not in doc.blocks:
+        blk = paper_layout_block(doc, layout_name)
+        if blk is None:
             continue
-        blk = doc.blocks[br_name]
         for e in blk:
             dt = e.dxftype()
             if dt == "INSERT":
@@ -237,10 +237,9 @@ def text_find_replace(
         layout = doc.layouts.get(layout_name)
         if layout is None or layout.is_modelspace:
             continue
-        br_name = layout.block_record_name
-        if br_name not in doc.blocks:
+        blk = paper_layout_block(doc, layout_name)
+        if blk is None:
             continue
-        blk = doc.blocks[br_name]
         for e in blk:
             dt = e.dxftype()
             if dt == "INSERT":

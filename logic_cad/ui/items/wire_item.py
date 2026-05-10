@@ -9,7 +9,14 @@ from PySide6.QtGui import QColor, QPainterPath, QPainterPathStroker, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsPathItem, QStyle, QStyleOptionGraphicsItem, QWidget
 from ezdxf.math import Vec2, bulge_to_arc
 
-from logic_cad.core.model.constants import LINETYPE_COM, LINETYPE_LOGIC, LINETYPE_VALUE, WIRE_BULGE_ARC_SEGMENTS
+from logic_cad.core.model.constants import (
+    CENTER_DASH_PATTERN,
+    DASH_PATTERN,
+    LINETYPE_COM,
+    LINETYPE_LOGIC,
+    LINETYPE_VALUE,
+    WIRE_BULGE_ARC_SEGMENTS,
+)
 from logic_cad.core.routing.wire_polyline_geometry import (
     distance_sq_to_parallel_drag_run_xyb,
     parallel_drag_run_edge_range_xyb,
@@ -21,10 +28,17 @@ from logic_cad.ui.snap_utils import dxf_from_scene_pos
 # Hit testing: corridor around centerline (± half width in mm, scene coords == DXF mm).
 WIRE_AXIS_HIT_WIDTH_MM = 1.0
 
-# Canvas preview for DXF CENTER (long dash, gap, short dash, gap) in pen-width units.
-CENTER_DASH_PATTERN: list[float] = [20.0, 4.0, 4.0, 4.0]
-DASH_PATTERN: list[float] = [10.0, 3.0]
+
 def apply_dxf_linetype_to_pen(pen: QPen, linetype: str) -> None:
+    """Map a DXF linetype name to ``QPen`` dash style (cosmetic pen width).
+
+    Args:
+        pen: Pen to configure (typically width 0, cosmetic).
+        linetype: Raw DXF name (e.g. ``CONTINUOUS``, ``DASHED``, ``BYLAYER``).
+
+    Returns:
+        ``None``; updates *pen* in place.
+    """
     u = (linetype or "").strip().upper()
     if u in ("BYLAYER", "BYBLOCK", "", LINETYPE_LOGIC, LINETYPE_COM, "CONTINUOUS"):
         pen.setStyle(Qt.PenStyle.SolidLine)

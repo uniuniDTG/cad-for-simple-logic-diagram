@@ -6,8 +6,9 @@ from PySide6.QtCore import QPoint, QPointF, Qt, Signal
 from PySide6.QtGui import QContextMenuEvent, QKeyEvent, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QLabel, QGraphicsScene, QGraphicsView
 
-from logic_cad.ui.symbol_block_editor.scene import SymbolBlockEditScene
+from logic_cad.ui.graphics_view_navigation import apply_wheel_pan_scroll_delta, wheel_zoom_multiplier
 from logic_cad.ui.snap_utils import dxf_from_scene_pos
+from logic_cad.ui.symbol_block_editor.scene import SymbolBlockEditScene
 
 
 class SymbolBlockEditView(QGraphicsView):
@@ -83,7 +84,7 @@ class SymbolBlockEditView(QGraphicsView):
         if delta == 0:
             super().wheelEvent(event)
             return
-        factor = 1.15 if delta > 0 else (1.0 / 1.15)
+        factor = wheel_zoom_multiplier(delta)
         self.scale(factor, factor)
         event.accept()
 
@@ -150,8 +151,7 @@ class SymbolBlockEditView(QGraphicsView):
         if self._panning:
             delta = event.pos() - self._last_pan_pos
             self._last_pan_pos = event.pos()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            apply_wheel_pan_scroll_delta(self, delta)
             self._len_hud.hide()
             event.accept()
             return

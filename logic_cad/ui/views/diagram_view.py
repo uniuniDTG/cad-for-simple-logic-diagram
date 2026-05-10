@@ -20,14 +20,15 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsScene, QGraphicsView, QLabel
 from shiboken6 import isValid as shiboken_is_valid
 
-from logic_cad.core.model.constants import A4_LANDSCAPE_HEIGHT_MM, A4_LANDSCAPE_WIDTH_MM
 from logic_cad.ui.app_user_settings import (
     AppUserSettings,
     CrosshairMode,
     DEFAULT_CROSSHAIR_LOCAL_HALF_EXTENT_PX,
 )
+from logic_cad.ui.graphics_view_navigation import apply_wheel_pan_scroll_delta, wheel_zoom_multiplier
 from logic_cad.ui.scene import DiagramScene
 from logic_cad.ui.snap_utils import dxf_from_scene_pos
+from logic_cad.ui.view_fit_rect import default_a4_fit_rect_mm
 
 _CROSSHAIR_PEN_PAD_PX = 3
 
@@ -546,15 +547,33 @@ class DiagramView(QGraphicsView):
             self._repaint_crosshair_viewport()
 
     def fit_a4_page(self) -> None:
-        """Reset transform and fit roughly one A4 sheet (mm) in scene coordinates."""
+        """Reset transform and fit roughly one A4 sheet (mm) in scene coordinates.
+
+        Returns:
+            None
+        """
+
         self.setTransform(QTransform())
-        margin = 12.0
-        # DXF y up → scene y down: A4 landscape sheet x∈[0,W], y_scene∈[-H,0]
-        rect = QRectF(
-            -margin,
-            -A4_LANDSCAPE_HEIGHT_MM - margin,
-            A4_LANDSCAPE_WIDTH_MM + 2 * margin,
-            A4_LANDSCAPE_HEIGHT_MM + 2 * margin,
+        self.fitInView(default_a4_fit_rect_mm(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._repaint_crosshair_viewport()
+
+    def fit_scene_extent_or_default_sheet(self) -> None:
+        """Reset transform and fit diagram content with an A4 landscape minimum frame.
+
+        When the scene is a :class:`DiagramScene`, uses
+        :meth:`~logic_cad.ui.scene.DiagramScene.extent_rect_for_view_fit`; otherwise
+        uses :func:`~logic_cad.ui.view_fit_rect.default_a4_fit_rect_mm`.
+
+        Returns:
+            None
+        """
+
+        self.setTransform(QTransform())
+        sc = self.scene()
+        rect = (
+            sc.extent_rect_for_view_fit()
+            if isinstance(sc, DiagramScene)
+            else default_a4_fit_rect_mm()
         )
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
         self._repaint_crosshair_viewport()
@@ -582,7 +601,7 @@ class DiagramView(QGraphicsView):
         super().keyPressEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
+        factor = wheel_zoom_multiplier(event.angleDelta().y())
         anchor = self.transformationAnchor()
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.scale(factor, factor)
@@ -671,8 +690,7 @@ class DiagramView(QGraphicsView):
             self._wire_len_label.hide()
             delta = event.pos() - self._pan_anchor
             self._pan_anchor = event.pos()
-            self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() - delta.x())
-            self.verticalScrollBar().setValue(self.verticalScrollBar().value() - delta.y())
+            apply_wheel_pan_scroll_delta(self, delta)
             self._update_cursor_dxf_status(event.pos())
             self._sync_crosshair_viewport_pos(event.pos())
             event.accept()
@@ -710,12 +728,20 @@ class DiagramView(QGraphicsView):
             self._clear_shift_rubber_merge()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        """Middle-button double-click: reset pan/zoom to full A4 landscape frame."""
+        """Middle-button double-click: reset pan/zoom to content extent with A4 floor.
+
+        Args:
+            event: Qt mouse event.
+
+        Returns:
+            None
+        """
+
         if event.button() == Qt.MouseButton.MiddleButton:
             self._pan_anchor = None
             self.unsetCursor()
             self._update_crosshair_viewport_cursor()
-            self.fit_a4_page()
+            self.fit_scene_extent_or_default_sheet()
             event.accept()
             return
         super().mouseDoubleClickEvent(self._strip_physical_ctrl_modifier(event))

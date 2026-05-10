@@ -11,42 +11,43 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING
 
 from ezdxf import revcloud
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainterPath, QPen, QTransform
 from PySide6.QtWidgets import (
     QApplication,
     QGraphicsEllipseItem,
     QGraphicsLineItem,
     QGraphicsPathItem,
+    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSceneContextMenuEvent,
     QGraphicsSceneMouseEvent,
-    QInputDialog,
     QMenu,
     QWidget,
 )
 
+from logic_cad.core.geometry.manhattan_metrics import manhattan_distance
 from logic_cad.core.model.constants import (
     ENTITY_TYPE_CHECKPOINT,
+    ENTITY_TYPE_GATE_INPUT_STUB_ARROW,
     ENTITY_TYPE_INPAGE_REF,
     ENTITY_TYPE_PAPER_FRAME,
     ENTITY_TYPE_TOC_HEADER,
     ENTITY_TYPE_TOC_ROW,
     ENTITY_TYPE_WIRE_ARROW,
     ENTITY_TYPE_WIRE_BRANCH,
+    ENTITY_TYPE_USER_ARC,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
     ENTITY_TYPE_USER_TEXT,
-    GATE_STATIC_LABEL_AND,
-    GATE_STATIC_LABEL_OR,
-    GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW,
     GRID_PITCH,
     INPAGE_SYM_HEIGHT_MM,
     INPAGE_SYM_HEIGHT_XDATA,
     LAYER_ANNOTATION,
     LAYER_CONTENTS_AREA,
     LAYER_FRAME,
+    LAYER_SYMBOL,
     LAYER_VPORT,
     LAYER_WIRE_COM,
     LINETYPE_CONTINUOUS,
@@ -59,8 +60,12 @@ from logic_cad.core.model.constants import (
 from logic_cad.core.logic_diagram import RerouteAfterGeometryChangeError
 from logic_cad.core.obstacles import build_routing_obstacles
 from logic_cad.core.uid_display import format_uid_display
+from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
 from logic_cad.core.pages.page_order import is_toc_layout_name
-from logic_cad.core.pages.page_ref import page_ref_insert_target_unresolved_for_editor
+from logic_cad.core.pages.page_ref import (
+    page_ref_insert_target_unresolved_for_editor,
+    refresh_page_ref_syms_on_layout,
+)
 from logic_cad.core.routing.wire_polyline_geometry import offset_polyline_segment_parallel
 from logic_cad.core.services.toc_frame_service import TOC_TEXT_TYPE
 from logic_cad.core.model.user_sketch_layers import (
@@ -71,17 +76,32 @@ from logic_cad.core.model.user_sketch_layers import (
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
 from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
+from logic_cad.ui.dialogs.user_text_place_dialog import prompt_dxf_text_string_and_height
 from logic_cad.ui.bulge_path import append_bulge_arc_to_path
 from logic_cad.ui.scene_item.z_order import CANVAS_Z_FRAME_VPORT_PREVIEW
 from logic_cad.ui.scene_item.osnap import OsnapCandidate, pick_osnap_candidate
 from logic_cad.ui.dxf_display_color import entity_stroke_qcolor
 from logic_cad.ui.items.mtext_item import DxfMTextItem
 from logic_cad.ui.items.symbol_item import SymbolItem
-from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserCloudItem, UserLineItem, UserTextItem
+from logic_cad.ui.items.user_geometry_items import (
+    UserArcItem,
+    UserCircleItem,
+    UserCloudItem,
+    UserLineItem,
+    UserTextItem,
+)
 from logic_cad.ui.items.wire_arrow_item import WireArrowItem
 from logic_cad.ui.items.wire_item import WireItem, apply_dxf_linetype_to_pen, dxf_to_scene
 from logic_cad.ui.passive_dxf_primitives import add_passive_layout_primitive_items
+from logic_cad.ui.sketch_arc_interaction import (
+    arc_vertex_marker_half_mm,
+    circle_radius_mm_from_anchor_and_cursor_dxf,
+    same_dxf_point,
+    try_dxf_arc_through_three_points,
+    user_arc_preview_qpainterpath_from_three_points,
+)
 from logic_cad.ui.snap_utils import dxf_from_scene_pos, snap_dxf_pos, snap_parallel_drag_delta_mm, user_line_end_dxf_from_scene
+from logic_cad.ui.view_fit_rect import DEFAULT_DIAGRAM_VIEW_FIT_MARGIN_MM, default_a4_fit_rect_mm
 
 if TYPE_CHECKING:
     from logic_cad.core.logic_diagram import LogicDiagram
@@ -155,6 +175,10 @@ class DiagramScene(QGraphicsScene):
         self._sketch_preview_circle: QGraphicsEllipseItem | None = None
         self._sketch_cloud_vertices_dxf: list[tuple[float, float]] = []
         self._sketch_preview_cloud: QGraphicsPathItem | None = None
+        self._sketch_arc_dxf_pts: list[tuple[float, float]] = []
+        self._sketch_preview_arc: QGraphicsPathItem | None = None
+        self._sketch_preview_arc_chord: QGraphicsLineItem | None = None
+        self._sketch_preview_arc_markers: list[QGraphicsRectItem] = []
         self._sketch_line_preview_length_mm: float | None = None
         self._user_sketch_line_linetype: str = normalize_user_sketch_linetype(LINETYPE_CONTINUOUS)
         self._show_routing_bbox = _env_truthy(ENV_SHOW_ROUTING_BBOX)
@@ -269,7 +293,9 @@ class DiagramScene(QGraphicsScene):
         for it in self.items():
             if isinstance(it, SymbolItem) and it.symbol_uid in symbol_uids:
                 it.setSelected(True)
-            if isinstance(it, (UserLineItem, UserCircleItem, UserCloudItem, UserTextItem)) and it.sketch_uid in sketch_uids:
+            if isinstance(
+                it, (UserLineItem, UserCircleItem, UserArcItem, UserCloudItem, UserTextItem)
+            ) and it.sketch_uid in sketch_uids:
                 it.setSelected(True)
 
     def deliver_context_menu(
@@ -589,18 +615,18 @@ class DiagramScene(QGraphicsScene):
     def deselect_user_sketch_items(self) -> None:
         """Clear selection from placed user sketch items."""
         for it in list(self.selectedItems()):
-            if isinstance(it, (UserLineItem, UserCircleItem, UserCloudItem, UserTextItem)):
+            if isinstance(it, (UserLineItem, UserCircleItem, UserArcItem, UserCloudItem, UserTextItem)):
                 it.setSelected(False)
 
     def set_user_sketch_tool(self, tool: str) -> None:
-        """``none`` | ``line`` | ``circle`` | ``cloud`` | ``text``."""
-        t = tool if tool in ("none", "line", "circle", "cloud", "text") else "none"
+        """``none`` | ``line`` | ``circle`` | ``arc`` | ``cloud`` | ``text``."""
+        t = tool if tool in ("none", "line", "circle", "arc", "cloud", "text") else "none"
         if t != self._sketch_tool:
             self.cancel_user_sketch()
         self._sketch_tool = t
 
     def user_sketch_tool(self) -> str:
-        """``none`` | ``line`` | ``circle`` | ``cloud`` | ``text`` (read-only)."""
+        """``none`` | ``line`` | ``circle`` | ``arc`` | ``cloud`` | ``text`` (read-only)."""
         return self._sketch_tool
 
     def user_sketch_line_default_linetype(self) -> str:
@@ -626,6 +652,11 @@ class DiagramScene(QGraphicsScene):
             pen.setCosmetic(True)
             apply_dxf_linetype_to_pen(pen, self._user_sketch_line_linetype)
             self._sketch_preview_line.setPen(pen)
+        if self._sketch_preview_arc is not None:
+            pen = QPen(QColor(180, 220, 255), 0)
+            pen.setCosmetic(True)
+            apply_dxf_linetype_to_pen(pen, self._user_sketch_line_linetype)
+            self._sketch_preview_arc.setPen(pen)
 
     def user_sketch_has_in_progress_geometry(self) -> bool:
         """Return True when a sketch tool has committed partial input (e.g. line first point).
@@ -638,11 +669,13 @@ class DiagramScene(QGraphicsScene):
 
         Returns:
             True if a user sketch tool is active and ``cancel_user_sketch`` would clear
-            partial line/circle state (``_sketch_p0_dxf``) or cloud vertices.
+            partial line/circle state (``_sketch_p0_dxf``), arc clicks, or cloud vertices.
         """
         if self._sketch_tool == "none":
             return False
         if self._sketch_p0_dxf is not None:
+            return True
+        if self._sketch_arc_dxf_pts:
             return True
         if self._sketch_cloud_vertices_dxf:
             return True
@@ -661,6 +694,11 @@ class DiagramScene(QGraphicsScene):
         if self._sketch_preview_cloud is not None:
             self.removeItem(self._sketch_preview_cloud)
             self._sketch_preview_cloud = None
+        self._clear_sketch_arc_draft_auxiliary_graphics()
+        self._sketch_arc_dxf_pts.clear()
+        if self._sketch_preview_arc is not None:
+            self.removeItem(self._sketch_preview_arc)
+            self._sketch_preview_arc = None
         self._sketch_line_preview_length_mm = None
 
     def cancel_wire_rubber(self) -> None:
@@ -717,7 +755,7 @@ class DiagramScene(QGraphicsScene):
         for i in range(len(pts) - 1):
             ax, ay = pts[i]
             bx, by = pts[i + 1]
-            t += abs(bx - ax) + abs(by - ay)
+            t += manhattan_distance((ax, ay), (bx, by))
         return t
 
     def _compute_wire_preview_length_mm(self, scene_pos: QPointF) -> float | None:
@@ -757,6 +795,24 @@ class DiagramScene(QGraphicsScene):
         for p in extra:
             dash.lineTo(dxf_to_scene(*p))
         self._manual_preview_dash.setPath(dash)
+
+    def extent_rect_for_view_fit(self) -> QRectF:
+        """Rectangle for middle-double-click zoom-to-content with an A4 landscape floor.
+
+        When the scene has drawable items, returns the union of padded item bounds and
+        the default A4 sheet rectangle (same as :meth:`DiagramView.fit_a4_page`).
+        With no items, returns only the A4 rectangle.
+
+        Returns:
+            Scene-axis-aligned rectangle in millimetres suitable for ``fitInView``.
+        """
+
+        margin = float(DEFAULT_DIAGRAM_VIEW_FIT_MARGIN_MM)
+        floor = default_a4_fit_rect_mm(margin_mm=margin)
+        br = self.itemsBoundingRect()
+        if br.isValid() and not br.isEmpty():
+            return br.adjusted(-margin, -margin, margin, margin).united(floor)
+        return floor
 
     def drawBackground(self, painter, rect) -> None:
         painter.fillRect(rect, QColor(34, 36, 40))
@@ -888,8 +944,6 @@ class DiagramScene(QGraphicsScene):
                     tgt = (xd.get(TARGET_LAYOUT_XDATA) or "").strip()
                     if not sym_label.strip() and tgt:
                         if not refreshed_page_refs:
-                            from logic_cad.core.pages.page_ref import refresh_page_ref_syms_on_layout
-
                             refresh_page_ref_syms_on_layout(
                                 self._diagram.doc, self._diagram.current_layout_name
                             )
@@ -904,8 +958,6 @@ class DiagramScene(QGraphicsScene):
                     sym_label = (xd.get("sym") or "").strip() or sym_label
                     peer_u = (xd.get(PEER_UID_XDATA) or "").strip()
                     if (not sym_label.strip() or not peer_u) and not refreshed_inpage_refs:
-                        from logic_cad.core.pages.inpage_ref import refresh_inpage_ref_syms_on_layout
-
                         refresh_inpage_ref_syms_on_layout(
                             self._diagram.doc, self._diagram.current_layout_name
                         )
@@ -953,10 +1005,6 @@ class DiagramScene(QGraphicsScene):
                         continue
                     seen_attrib_tag.add(tu)
                     inst_attribs[str(a.dxf.tag)] = (str(a.dxf.text or ""), bool(a.dxf.invisible))
-                show_stub_in_arrow = False
-                if et in ("AND", "OR"):
-                    xd_gate = read_ld_app_dict(ins)
-                    show_stub_in_arrow = str(xd_gate.get(GATE_XDATA_SHOW_INPUT_STUB_IN_ARROW) or "") == "1"
                 page_ref_break = False
                 if et == "PAGE_REF":
                     xd_pr = read_ld_app_dict(ins)
@@ -982,7 +1030,6 @@ class DiagramScene(QGraphicsScene):
                     scale_x=sx,
                     scale_y=sy,
                     instance_attribs=inst_attribs,
-                    show_input_stub_in_arrow=show_stub_in_arrow,
                     inpage_sym_height_mm=inpage_sym_height_mm
                     if et == ENTITY_TYPE_INPAGE_REF
                     else None,
@@ -1018,6 +1065,21 @@ class DiagramScene(QGraphicsScene):
                 st_a = entity_stroke_qcolor(self._diagram.doc, e)
                 # COM base wire centerline is hidden, but arrowheads must remain visible.
                 self.addItem(WireArrowItem(pts_xy, linetype=lt_a, stroke_color=st_a))
+            elif (
+                e.dxftype() == "LWPOLYLINE"
+                and str(e.dxf.layer) == LAYER_SYMBOL
+                and get_type(e) == ENTITY_TYPE_GATE_INPUT_STUB_ARROW
+            ):
+                rows_ga = list(e.get_points("xyb"))
+                if len(rows_ga) < 2:
+                    continue
+                pts_gate_arr = [(float(r[0]), float(r[1])) for r in rows_ga]
+                lt_g = getattr(e.dxf, "linetype", None)
+                lt_ag = str(lt_g).strip() if lt_g else ""
+                if not lt_ag:
+                    lt_ag = LINETYPE_CONTINUOUS
+                st_ag = entity_stroke_qcolor(self._diagram.doc, e)
+                self.addItem(WireArrowItem(pts_gate_arr, linetype=lt_ag, stroke_color=st_ag))
             if e.dxftype() == "LWPOLYLINE" and e.dxf.layer in (LAYER_FRAME, LAYER_VPORT):
                 pts: list[tuple[float, float]] = []
                 with e.points() as p:
@@ -1088,6 +1150,20 @@ class DiagramScene(QGraphicsScene):
                     lt = user_sketch_display_linetype_for_entity(e)
                     st = entity_stroke_qcolor(self._diagram.doc, e)
                     self.addItem(UserCircleItem(uid, cx, cy, r, linetype=lt, stroke_color=st))
+            if e.dxftype() == "ARC" and uid and (
+                _layer_name == LAYER_ANNOTATION or is_user_sketch_wire_layer(_layer_name)
+            ):
+                et = get_type(e)
+                if et == ENTITY_TYPE_USER_ARC:
+                    cx, cy = float(e.dxf.center.x), float(e.dxf.center.y)
+                    r = float(e.dxf.radius)
+                    sa = float(e.dxf.start_angle)
+                    ea = float(e.dxf.end_angle)
+                    lt = user_sketch_display_linetype_for_entity(e)
+                    st = entity_stroke_qcolor(self._diagram.doc, e)
+                    self.addItem(
+                        UserArcItem(uid, cx, cy, r, sa, ea, linetype=lt, stroke_color=st)
+                    )
             if e.dxftype() == "TEXT" and str(e.dxf.layer) == LAYER_ANNOTATION and uid:
                 et = get_type(e)
                 if et == ENTITY_TYPE_USER_TEXT:
@@ -1099,15 +1175,9 @@ class DiagramScene(QGraphicsScene):
 
     def _circle_radius_mm(self, center: tuple[float, float], scene_pos: QPointF) -> float:
         tx, ty = snap_dxf_pos(*dxf_from_scene_pos(scene_pos))
-        dx, dy = tx - center[0], ty - center[1]
-        dist = float(math.hypot(dx, dy))
-        if dist < 1e-9:
-            return GRID_PITCH
-        return max(GRID_PITCH, round(dist / GRID_PITCH) * GRID_PITCH)
-
-    @staticmethod
-    def _same_dxf_point(a: tuple[float, float], b: tuple[float, float], tol: float = 1e-9) -> bool:
-        return abs(a[0] - b[0]) <= tol and abs(a[1] - b[1]) <= tol
+        return circle_radius_mm_from_anchor_and_cursor_dxf(
+            center, (tx, ty), snap_pitch_mm=float(GRID_PITCH)
+        )
 
     @staticmethod
     def _signed_area2(vertices: list[tuple[float, float]]) -> float:
@@ -1142,6 +1212,55 @@ class DiagramScene(QGraphicsScene):
         cx, cy = self._sketch_p0_dxf
         top_left = dxf_to_scene(cx - r, cy + r)
         self._sketch_preview_circle.setRect(top_left.x(), top_left.y(), 2 * r, 2 * r)
+
+    def _update_sketch_arc_preview(self, mouse_scene: QPointF) -> None:
+        """Rubber-band arc through two fixed points and the snapped cursor position."""
+        if self._sketch_preview_arc is None or len(self._sketch_arc_dxf_pts) != 2:
+            return
+        p0, p1 = self._sketch_arc_dxf_pts[0], self._sketch_arc_dxf_pts[1]
+        tx, ty = snap_dxf_pos(*dxf_from_scene_pos(mouse_scene))
+        path = user_arc_preview_qpainterpath_from_three_points(p0, p1, (tx, ty))
+        if path is None:
+            self._sketch_preview_arc.setPath(QPainterPath())
+            return
+        self._sketch_preview_arc.setPath(path)
+
+    def _clear_sketch_arc_draft_auxiliary_graphics(self) -> None:
+        """Remove chord rubber-band and vertex handles used only during USER_ARC placement."""
+
+        if self._sketch_preview_arc_chord is not None:
+            self.removeItem(self._sketch_preview_arc_chord)
+            self._sketch_preview_arc_chord = None
+        self._clear_sketch_arc_markers_only()
+
+    def _clear_sketch_arc_markers_only(self) -> None:
+        for mr in self._sketch_preview_arc_markers:
+            self.removeItem(mr)
+        self._sketch_preview_arc_markers.clear()
+
+    def _update_sketch_arc_chord_preview(self, mouse_scene: QPointF) -> None:
+        if self._sketch_preview_arc_chord is None or len(self._sketch_arc_dxf_pts) != 1:
+            return
+        p0 = self._sketch_arc_dxf_pts[0]
+        tx, ty = snap_dxf_pos(*dxf_from_scene_pos(mouse_scene))
+        p0s = dxf_to_scene(*p0)
+        p1s = dxf_to_scene(tx, ty)
+        self._sketch_preview_arc_chord.setLine(p0s.x(), p0s.y(), p1s.x(), p1s.y())
+
+    def _add_sketch_arc_locked_vertex_markers(self) -> None:
+        self._clear_sketch_arc_markers_only()
+        if len(self._sketch_arc_dxf_pts) < 2:
+            return
+        half = arc_vertex_marker_half_mm(float(GRID_PITCH))
+        for x, y in self._sketch_arc_dxf_pts[:2]:
+            mr = QGraphicsRectItem(-half, -half, 2.0 * half, 2.0 * half)
+            mr.setBrush(QColor(100, 180, 220))
+            mr.setPen(Qt.PenStyle.NoPen)
+            mr.setZValue(10002.5)
+            ps = dxf_to_scene(x, y)
+            mr.setPos(ps)
+            self.addItem(mr)
+            self._sketch_preview_arc_markers.append(mr)
 
     def _cloud_preview_vertices(self, mouse_scene: QPointF) -> list[tuple[float, float]]:
         if not self._sketch_cloud_vertices_dxf:
@@ -1263,6 +1382,56 @@ class DiagramScene(QGraphicsScene):
                     pass
                 self.rebuild()
             return
+        if self._sketch_tool == "arc":
+            xd, yd = snap_dxf_pos(*dxf_from_scene_pos(sp))
+            if len(self._sketch_arc_dxf_pts) == 0:
+                self._sketch_arc_dxf_pts.append((xd, yd))
+                chord = QGraphicsLineItem()
+                pen_ch = QPen(QColor(180, 220, 255), 0)
+                pen_ch.setStyle(Qt.PenStyle.DashLine)
+                pen_ch.setCosmetic(True)
+                chord.setPen(pen_ch)
+                chord.setZValue(10002.0)
+                self._sketch_preview_arc_chord = chord
+                self.addItem(chord)
+                self._update_sketch_arc_chord_preview(sp)
+                return
+            if len(self._sketch_arc_dxf_pts) == 1:
+                if same_dxf_point(self._sketch_arc_dxf_pts[0], (xd, yd)):
+                    return
+                self._sketch_arc_dxf_pts.append((xd, yd))
+                if self._sketch_preview_arc_chord is not None:
+                    self.removeItem(self._sketch_preview_arc_chord)
+                    self._sketch_preview_arc_chord = None
+                self._add_sketch_arc_locked_vertex_markers()
+                pip = QGraphicsPathItem()
+                pen = QPen(QColor(180, 220, 255), 0)
+                pen.setCosmetic(True)
+                apply_dxf_linetype_to_pen(pen, self._user_sketch_line_linetype)
+                pip.setPen(pen)
+                pip.setBrush(Qt.BrushStyle.NoBrush)
+                pip.setZValue(10002.0)
+                self._sketch_preview_arc = pip
+                self.addItem(pip)
+                self._update_sketch_arc_preview(sp)
+                return
+            if len(self._sketch_arc_dxf_pts) == 2:
+                p0, p1 = self._sketch_arc_dxf_pts[0], self._sketch_arc_dxf_pts[1]
+                if same_dxf_point(p0, (xd, yd)) or same_dxf_point(p1, (xd, yd)):
+                    return
+                geom = try_dxf_arc_through_three_points(p0, p1, (xd, yd))
+                if geom is None:
+                    return
+                (cx, cy), r, sa, ea = geom
+                try:
+                    with self._diagram.begin("user_geom"):
+                        self._diagram.add_user_arc(
+                            (cx, cy), r, sa, ea, self._user_sketch_line_linetype
+                        )
+                except Exception:
+                    pass
+                self.rebuild()
+            return
         if self._sketch_tool == "cloud":
             xd, yd = snap_dxf_pos(*dxf_from_scene_pos(sp))
             if self._sketch_cloud_vertices_dxf:
@@ -1282,16 +1451,23 @@ class DiagramScene(QGraphicsScene):
             self._update_sketch_cloud_preview(sp)
             return
         if self._sketch_tool == "text":
-            xd, yd = dxf_from_scene_pos(sp)
+            xd, yd = snap_dxf_pos(*dxf_from_scene_pos(sp))
             par = QApplication.activeWindow()
-            text, ok = QInputDialog.getText(par, "注釈テキスト", "文字列入力:")
-            if ok and text.strip():
-                try:
-                    with self._diagram.begin("user_geom"):
-                        self._diagram.add_user_text((xd, yd), text.strip(), USER_TEXT_DEFAULT_HEIGHT_MM)
-                except Exception:
-                    pass
-                self.rebuild()
+            prompted = prompt_dxf_text_string_and_height(
+                par,
+                window_title="注釈テキスト",
+                empty_text_warning_title="注釈テキスト",
+                default_height_mm=float(USER_TEXT_DEFAULT_HEIGHT_MM),
+            )
+            if prompted is None:
+                return
+            text, h_mm = prompted
+            try:
+                with self._diagram.begin("user_geom"):
+                    self._diagram.add_user_text((xd, yd), text.strip(), h_mm)
+            except Exception:
+                pass
+            self.rebuild()
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if self._wire_seg_drag is not None:
@@ -1328,6 +1504,18 @@ class DiagramScene(QGraphicsScene):
             self._update_sketch_line_preview(event.scenePos(), event.modifiers())
         elif self._sketch_tool == "circle" and self._sketch_p0_dxf is not None and self._sketch_preview_circle is not None:
             self._update_sketch_circle_preview(event.scenePos())
+        elif (
+            self._sketch_tool == "arc"
+            and len(self._sketch_arc_dxf_pts) == 1
+            and self._sketch_preview_arc_chord is not None
+        ):
+            self._update_sketch_arc_chord_preview(event.scenePos())
+        elif (
+            self._sketch_tool == "arc"
+            and len(self._sketch_arc_dxf_pts) == 2
+            and self._sketch_preview_arc is not None
+        ):
+            self._update_sketch_arc_preview(event.scenePos())
         elif self._sketch_tool == "cloud" and self._sketch_cloud_vertices_dxf and self._sketch_preview_cloud is not None:
             self._update_sketch_cloud_preview(event.scenePos())
         super().mouseMoveEvent(event)
@@ -1365,7 +1553,9 @@ class DiagramScene(QGraphicsScene):
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.RightButton:
-            if self._sketch_tool != "none" and self._sketch_p0_dxf is not None:
+            if self._sketch_tool != "none" and (
+                self._sketch_p0_dxf is not None or self._sketch_arc_dxf_pts
+            ):
                 self.cancel_user_sketch()
                 event.accept()
                 return
@@ -1557,12 +1747,12 @@ class DiagramScene(QGraphicsScene):
         ):
             clicked = snap_dxf_pos(*dxf_from_scene_pos(event.scenePos()))
             start = self._sketch_cloud_vertices_dxf[0]
-            if self._same_dxf_point(clicked, start, tol=GRID_PITCH * 0.5):
-                if self._same_dxf_point(self._sketch_cloud_vertices_dxf[-1], start):
+            if same_dxf_point(clicked, start, tol=GRID_PITCH * 0.5):
+                if same_dxf_point(self._sketch_cloud_vertices_dxf[-1], start):
                     self._sketch_cloud_vertices_dxf.pop()
                 self._finalize_sketch_cloud(is_closed=True)
             else:
-                if not self._same_dxf_point(self._sketch_cloud_vertices_dxf[-1], clicked):
+                if not same_dxf_point(self._sketch_cloud_vertices_dxf[-1], clicked):
                     self._sketch_cloud_vertices_dxf.append(clicked)
                 self._finalize_sketch_cloud(is_closed=False)
             event.accept()
@@ -1589,11 +1779,15 @@ class DiagramScene(QGraphicsScene):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         moved_syms: list[SymbolItem] = []
-        moved_user: list[UserLineItem | UserCircleItem | UserCloudItem | UserTextItem] = []
+        moved_user: list[
+            UserLineItem | UserCircleItem | UserArcItem | UserCloudItem | UserTextItem
+        ] = []
         for it in self.selectedItems():
             if isinstance(it, SymbolItem) and getattr(it, "_moved", False):
                 moved_syms.append(it)
-            elif isinstance(it, (UserLineItem, UserCircleItem, UserCloudItem, UserTextItem)) and getattr(it, "_moved", False):
+            elif isinstance(
+                it, (UserLineItem, UserCircleItem, UserArcItem, UserCloudItem, UserTextItem)
+            ) and getattr(it, "_moved", False):
                 moved_user.append(it)
         if not moved_syms and not moved_user:
             return
@@ -1603,7 +1797,9 @@ class DiagramScene(QGraphicsScene):
         for sel in self.selectedItems():
             if isinstance(sel, SymbolItem):
                 preserve_symbol_uids.add(sel.symbol_uid)
-            elif isinstance(sel, (UserLineItem, UserCircleItem, UserCloudItem, UserTextItem)):
+            elif isinstance(
+                sel, (UserLineItem, UserCircleItem, UserArcItem, UserCloudItem, UserTextItem)
+            ):
                 preserve_sketch_uids.add(sel.sketch_uid)
         uids = {it.symbol_uid for it in moved_syms}
         moved_symbol_targets: dict[str, tuple[float, float]] = {}
@@ -1637,7 +1833,9 @@ class DiagramScene(QGraphicsScene):
         self.rebuild()
         self.select_pasted_items(preserve_symbol_uids, preserve_sketch_uids)
 
-    def _commit_user_sketch_move(self, it: UserLineItem | UserCircleItem | UserCloudItem | UserTextItem) -> None:
+    def _commit_user_sketch_move(
+        self, it: UserLineItem | UserCircleItem | UserArcItem | UserCloudItem | UserTextItem
+    ) -> None:
         g = self._diagram.user_geom
         if isinstance(it, UserLineItem):
             (x0, y0), (x1, y1) = it.line_endpoints_dxf()
@@ -1649,6 +1847,11 @@ class DiagramScene(QGraphicsScene):
             cx, cy = snap_dxf_pos(cx, cy)
             r = max(GRID_PITCH, round(r / GRID_PITCH) * GRID_PITCH)
             g.set_user_circle_geometry(it.sketch_uid, (cx, cy), r)
+        elif isinstance(it, UserArcItem):
+            (cx, cy), r, sa, ea = it.arc_geometry_dxf()
+            cx, cy = snap_dxf_pos(cx, cy)
+            r = max(GRID_PITCH, round(r / GRID_PITCH) * GRID_PITCH)
+            g.set_user_arc_geometry(it.sketch_uid, (cx, cy), r, sa, ea)
         elif isinstance(it, UserCloudItem):
             points_xyb, is_closed = it.cloud_points_dxf()
             snapped = [(float(x), float(y), float(b)) for x, y, b in points_xyb]

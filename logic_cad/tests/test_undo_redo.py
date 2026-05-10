@@ -1,5 +1,6 @@
 """DocumentDelta undo/redo."""
 
+from logic_cad.core.model.constants import GATE_STATIC_LABEL_AND, GATE_STATIC_LABEL_OR
 from logic_cad.core.model.xdata import get_type
 from logic_cad.core.undo.entity_serialize import restore_entity_from_payload, serialize_entity
 from logic_cad.core.undo.history import destroy_entity
@@ -57,7 +58,7 @@ def test_undo_drop_gate_then_place_again_restores_block_geometry() -> None:
     assert len(list(ins.attribs)) >= 1
     static = next((a for a in ins.attribs if str(a.dxf.tag) == "STATIC_LABEL0"), None)
     assert static is not None
-    assert str(static.dxf.text or "").strip() == "&"
+    assert str(static.dxf.text or "").strip() == GATE_STATIC_LABEL_AND
     assert get_type(ins) == "AND"
     assert d.index.get_port_world(u, "OUT0_LOGIC") is not None
 
@@ -75,6 +76,6 @@ def test_undo_drop_or_gate_then_place_again_restores_block_geometry() -> None:
     assert len(list(ins.attribs)) >= 1
     static = next((a for a in ins.attribs if str(a.dxf.tag) == "STATIC_LABEL0"), None)
     assert static is not None
-    assert str(static.dxf.text or "").strip() == "≥1"
+    assert str(static.dxf.text or "").strip() == GATE_STATIC_LABEL_OR
     assert get_type(ins) == "OR"
     assert d.index.get_port_world(u, "OUT0_LOGIC") is not None

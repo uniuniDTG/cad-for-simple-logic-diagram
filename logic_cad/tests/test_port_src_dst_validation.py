@@ -12,7 +12,7 @@ from logic_cad.core.graph.port_src_dst_solver import (
 )
 from logic_cad.core.graph.wire_graph_deps import WireGraphDeps
 from logic_cad.core.logic_diagram import LogicDiagram
-from logic_cad.core.model.constants import ENTITY_TYPE_WIRE_BRANCH
+from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT, ENTITY_TYPE_WIRE_BRANCH
 from logic_cad.core.model.xdata import build_ld_app_tags, set_entity_xdata
 
 from logic_cad.tests.support.diagram_entities import entity_and_ld_app_dict_for_uid
@@ -73,7 +73,6 @@ def test_assert_checkpoint_cp_out_full():
         }
     ]
     iter_wm = _iter_from_rows(rows)
-    from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT
 
     types = {cp: ENTITY_TYPE_CHECKPOINT, "g": "AND_2"}
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from logic_cad.core.model.constants import GRID_PITCH
 from logic_cad.core.debug.debug_log import logic_cad_debug_routing_verbose, logic_cad_log
+from logic_cad.core.geometry.manhattan_metrics import (
+    segment_is_axis_aligned,
+    truncated_grid_steps_sum,
+)
+from logic_cad.core.model.constants import GRID_PITCH
 from ._format import fmt_pt
 from .facing import compute_bypass_lines, gen_wraparound_candidates
 from .obstacles import obstacle_rects_inflated, path_hits_obstacle_rects
@@ -40,7 +44,7 @@ def collect_fixed_manhattan_polylines(
         if len(p) >= 2:
             candidates.append(p)
 
-    if abs(x0 - x1) < 1e-9 or abs(y0 - y1) < 1e-9:
+    if segment_is_axis_aligned((x0, y0), (x1, y1)):
         add([(x0, y0), (x1, y1)])
     add([(x0, y0), (x1, y0), (x1, y1)])
     add([(x0, y0), (x0, y1), (x1, y1)])
@@ -58,7 +62,7 @@ def collect_fixed_manhattan_polylines(
     if need_detour_candidates:
         k_max = min(
             FIXED_MANHATTAN_DETOUR_K_MAX,
-            max(16, int(abs(x1 - x0) / pitch) + int(abs(y1 - y0) / pitch) + 8),
+            max(16, truncated_grid_steps_sum((x0, y0), (x1, y1), pitch) + 8),
         )
         for k in range(-k_max, k_max + 1):
             if k == 0:

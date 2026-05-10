@@ -3,11 +3,12 @@
 from logic_cad.core.dxf.dxf_repository import new_document
 from logic_cad.core.model.constants import (
     ENTITY_TYPE_INPAGE_REF,
+    INPAGE_LINK_NAME_AUTO_XDATA,
     INPAGE_SYM_HEIGHT_XDATA,
     PEER_UID_XDATA,
 )
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
-from logic_cad.core.pages.inpage_ref import inpage_ref_label
+from logic_cad.core.pages.inpage_ref import inpage_ref_label, refresh_inpage_ref_syms_on_layout
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory
 from logic_cad.core.services.layout_service import LayoutService
 from logic_cad.core.services.symbol_service import SymbolService
@@ -126,3 +127,50 @@ def test_duplicate_page_remaps_peer_uid() -> None:
     p1 = read_ld_app_dict(ins1).get(PEER_UID_XDATA)
     assert {p0, p1} == {uids[0], uids[1]}
     assert p0 != p1
+
+
+def test_manual_link_label_survives_refresh() -> None:
+    doc = new_document()
+    layout = [L.name for L in doc.layouts if not L.is_modelspace][0]
+    ss = SymbolService(doc, DynamicGateFactory())
+    u_from = ss.place_inpage_ref(layout, (10.0, 40.0), outgoing=True, peer_uid="")
+    u_to = ss.place_inpage_ref(layout, (40.0, 40.0), outgoing=False, peer_uid=u_from)
+    ss.link_inpage_ref_pair(layout, u_from, u_to)
+    ss.set_inpage_ref_link_display(layout, u_from, link_name_auto=False, display_text="Alpha")
+    refresh_inpage_ref_syms_on_layout(doc, layout)
+    assert _sym(u_from, ss, layout) == "Alpha"
+    assert _sym(u_to, ss, layout) == "Alpha"
+    for u in (u_from, u_to):
+        xd = read_ld_app_dict(ss.insert_by_uid(layout, u))
+        assert xd.get(INPAGE_LINK_NAME_AUTO_XDATA) == "0"
+
+
+def test_mixed_manual_auto_ordinals_skip_gaps() -> None:
+    """Manual pair first in sort order: auto pair still gets ※1 (policy A)."""
+    doc = new_document()
+    layout = [L.name for L in doc.layouts if not L.is_modelspace][0]
+    ss = SymbolService(doc, DynamicGateFactory())
+    a0 = ss.place_inpage_ref(layout, (5.0, 50.0), outgoing=True, peer_uid="")
+    b0 = ss.place_inpage_ref(layout, (25.0, 50.0), outgoing=False, peer_uid=a0)
+    ss.link_inpage_ref_pair(layout, a0, b0)
+    a1 = ss.place_inpage_ref(layout, (5.0, 30.0), outgoing=True, peer_uid="")
+    b1 = ss.place_inpage_ref(layout, (25.0, 30.0), outgoing=False, peer_uid=a1)
+    ss.link_inpage_ref_pair(layout, a1, b1)
+    ss.set_inpage_ref_link_display(layout, a0, link_name_auto=False, display_text="M")
+    assert _sym(a0, ss, layout) == "M"
+    assert _sym(b0, ss, layout) == "M"
+    assert _sym(a1, ss, layout) == "※1"
+    assert _sym(b1, ss, layout) == "※1"
+
+
+def test_revert_manual_to_auto_renumbers() -> None:
+    doc = new_document()
+    layout = [L.name for L in doc.layouts if not L.is_modelspace][0]
+    ss = SymbolService(doc, DynamicGateFactory())
+    u_from = ss.place_inpage_ref(layout, (10.0, 40.0), outgoing=True, peer_uid="")
+    u_to = ss.place_inpage_ref(layout, (40.0, 40.0), outgoing=False, peer_uid=u_from)
+    ss.link_inpage_ref_pair(layout, u_from, u_to)
+    ss.set_inpage_ref_link_display(layout, u_from, link_name_auto=False, display_text="Z")
+    ss.set_inpage_ref_link_display(layout, u_from, link_name_auto=True, display_text="")
+    assert _sym(u_from, ss, layout) == "※1"
+    assert _sym(u_to, ss, layout) == "※1"

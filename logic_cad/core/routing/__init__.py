@@ -1,8 +1,15 @@
 """Grid-aligned Manhattan wire routing, obstacle avoidance, and crossing bulges.
 
+**Obstacle naming:** ``logic_cad.core.obstacles`` builds axis-aligned rectangles
+from the DXF document. This package's submodule ``routing.obstacles`` tests
+segments and polylines against those rectangles (open inflated rectangles).
+
 Submodules: ``profile`` (tunables), ``obstacles`` / ``polyline`` (geometry), ``scoring``,
 ``facing`` (wraparound hints), ``ovg`` (visibility-graph fallback), ``manhattan`` (main path),
 ``escape`` (port escape + lane stagger), ``crossings`` (intersections and semijump bulges).
+
+Wire services that need document builders plus these entry points may import
+``wire_routing_from_document`` (not re-exported here).
 """
 
 from __future__ import annotations

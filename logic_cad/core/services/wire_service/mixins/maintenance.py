@@ -29,8 +29,11 @@ from logic_cad.core.model.xdata import (
     read_ld_app_dict,
     set_entity_xdata,
 )
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.routing.wire_arrow_geometry import wire_in_arrow_wing_points_xyb
 from logic_cad.core.routing.wire_polyline_geometry import _dist_mm, _lwpolyline_vertices
+from logic_cad.core.symbol_clipboard import WireCopyRecord
+from logic_cad.core.undo.history import find_entity_by_uid
 
 
 class WireServiceMaintenanceMixin:
@@ -115,7 +118,7 @@ class WireServiceMaintenanceMixin:
 
     def refresh_com_wire_markers(self, layout_name: str) -> None:
         """Rebuild COM helper LINE/CIRCLE entities in *layout_name* from wire geometry."""
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         stale_markers = [
             e
             for e in blk
@@ -153,13 +156,11 @@ class WireServiceMaintenanceMixin:
 
     def _after_wire_geometry_changed(self, layout_name: str, entity) -> None:
         """Refresh WIRE_ARROW child LWPOLYLINE when a WIRE polyline's vertices change."""
-        from logic_cad.core.model.xdata import get_uid as xget_uid
-
         if entity.dxftype() != "LWPOLYLINE":
             return
         if get_type(entity) != "WIRE":
             return
-        wu = xget_uid(entity)
+        wu = get_uid(entity)
         if not wu:
             return
         wd = read_ld_app_dict(entity)
@@ -175,7 +176,7 @@ class WireServiceMaintenanceMixin:
             self.doc.entitydb.delete_entity(ent)
 
     def _iter_wire_arrow_entities(self, layout_name: str, parent_wire_uid: str):
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         for e in blk:
             if e.dxftype() != "LWPOLYLINE" or not is_wire_layer(str(e.dxf.layer)):
                 continue
@@ -187,8 +188,6 @@ class WireServiceMaintenanceMixin:
 
     def sync_wire_arrow_dxf(self, layout_name: str, wire_uid: str) -> None:
         """Create, update, or delete WIRE_ARROW LWPOLYLINE from WIRE *wire_uid* and ``show_in_arrow``."""
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         w_ent = find_entity_by_uid(self.doc, wire_uid)
         if w_ent is None or w_ent.dxftype() != "LWPOLYLINE" or get_type(w_ent) != "WIRE":
             self.remove_wire_arrow_children(layout_name, wire_uid)
@@ -215,7 +214,7 @@ class WireServiceMaintenanceMixin:
             e0.dxf.layer = wire_layer
             e0.dxf.linetype = lt
             return
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         lw = blk.add_lwpolyline(
             [(float(x), float(y)) for x, y in pts_xy],
             dxfattribs={"layer": wire_layer, "linetype": lt},
@@ -228,8 +227,6 @@ class WireServiceMaintenanceMixin:
 
     def set_wire_show_in_arrow(self, layout_name: str, wire_uid: str, show: bool) -> None:
         """Persist ``show_in_arrow`` on WIRE XDATA and sync or remove WIRE_ARROW geometry."""
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         e = find_entity_by_uid(self.doc, wire_uid)
         if e is None or e.dxftype() != "LWPOLYLINE":
             raise ValueError("配線が見つかりません。")
@@ -250,8 +247,6 @@ class WireServiceMaintenanceMixin:
             self.remove_wire_arrow_children(layout_name, wire_uid)
 
     def disconnect(self, layout_name: str, wire_uid: str) -> None:
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         self.remove_wire_arrow_children(layout_name, wire_uid)
         e = find_entity_by_uid(self.doc, wire_uid)
         if e is None or e.dxftype() != "LWPOLYLINE":
@@ -260,8 +255,6 @@ class WireServiceMaintenanceMixin:
         self.refresh_com_wire_markers(layout_name)
 
     def set_wire_linetype(self, layout_name: str, wire_uid: str, linetype: str) -> None:
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         e = find_entity_by_uid(self.doc, wire_uid)
         if e is None:
             raise ValueError("配線が見つかりません。")
@@ -289,8 +282,6 @@ class WireServiceMaintenanceMixin:
         self.refresh_com_wire_markers(layout_name)
 
     def set_wire_skip_auto_reroute(self, layout_name: str, wire_uid: str, skip: bool) -> None:
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         e = find_entity_by_uid(self.doc, wire_uid)
         if e is None or e.dxftype() != "LWPOLYLINE":
             raise ValueError("配線が見つかりません。")
@@ -306,8 +297,6 @@ class WireServiceMaintenanceMixin:
 
     def set_wire_allow_orthogonal_cross(self, layout_name: str, wire_uid: str, allow: bool) -> None:
         """Persist ``allow_orthogonal_cross`` on WIRE XDATA for symbol-only hard-obstacle routing."""
-        from logic_cad.core.undo.history import find_entity_by_uid
-
         _ = layout_name
         e = find_entity_by_uid(self.doc, wire_uid)
         if e is None or e.dxftype() != "LWPOLYLINE":
@@ -332,9 +321,6 @@ class WireServiceMaintenanceMixin:
         endpoint_tol_mm: float | None = None,
     ) -> tuple[bool, bool]:
         """Returns (logical_ok, geometry_ok). Either False marks the wire as visually broken."""
-        from logic_cad.core.undo.history import find_entity_by_uid
-        from logic_cad.core.model.xdata import get_type
-
         tol = endpoint_tol_mm
         if tol is None:
             tol = max(grid_snap_tolerance() * 2.0, ROUTE_ESCAPE_MM)
@@ -395,12 +381,10 @@ class WireServiceMaintenanceMixin:
                 if su:
                     return (str(su), sp)
         return None
-    def clipboard_records_internal_wires(self, layout_name: str, uids: set[str]):
-        from logic_cad.core.symbol_clipboard import WireCopyRecord
-        from logic_cad.core.model.xdata import get_type
 
+    def clipboard_records_internal_wires(self, layout_name: str, uids: set[str]):
         out: list = []
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         for e in blk:
             if e.dxftype() != "LWPOLYLINE" or not is_wire_layer(str(e.dxf.layer)):
                 continue
@@ -436,7 +420,7 @@ class WireServiceMaintenanceMixin:
             raise ValueError("貼り付け後のシンボル対応表に、クリップボードの配線の端点がありません。")
         extra["src"] = uid_map[osrc]
         extra["dst"] = uid_map[odst]
-        blk = self._layout_block(layout_name)
+        blk = paper_layout_block(self.doc, layout_name)
         wunit_str = str(extra.get("unit") or "LOGIC")
         wl = layer_for_wire_unit(wunit_str)
         wu_norm = wunit_str.upper()

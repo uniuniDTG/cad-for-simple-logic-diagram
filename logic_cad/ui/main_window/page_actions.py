@@ -6,19 +6,24 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QPoint, QRectF, QTimer, Qt
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QFormLayout,
     QInputDialog,
     QLineEdit,
     QMenu,
     QMessageBox,
-    QVBoxLayout,
 )
 
+from logic_cad.core.model.constants import A4_LANDSCAPE_HEIGHT_MM, A4_LANDSCAPE_WIDTH_MM
 from logic_cad.core.pages.page_layout_meta import read_page_meta
+from logic_cad.core.pages.page_order import validate_paper_layout_name
+from logic_cad.ui.dialog_helpers import (
+    create_ok_cancel_dialog,
+    dialog_exec_accepted,
+    question_yes_no,
+)
 from logic_cad.ui.dialogs.page_import_dialog import run_page_import_dialog
 from logic_cad.ui.dialogs.page_ref_reorder_dialog import run_page_ref_reorder_dialog
+from logic_cad.ui.items.symbol_item import SymbolItem
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -72,8 +77,7 @@ def on_page_tab_bar_context(win: MainWindow, pos: QPoint) -> None:
 
 
 def show_add_page_dialog(win: MainWindow) -> None:
-    dlg = QDialog(win)
-    dlg.setWindowTitle("ページを追加")
+    dlg, layout, buttons = create_ok_cancel_dialog(win, "ページを追加")
     form = QFormLayout()
     ed_name = QLineEdit()
     ed_rev = QLineEdit("0")
@@ -84,13 +88,9 @@ def show_add_page_dialog(win: MainWindow) -> None:
         desc_editor=ed_desc,
         rev_editor=ed_rev,
     )
-    layout = QVBoxLayout(dlg)
     layout.addLayout(form)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.accepted.connect(dlg.accept)
-    buttons.rejected.connect(dlg.reject)
     layout.addWidget(buttons)
-    if dlg.exec() != QDialog.DialogCode.Accepted:
+    if not dialog_exec_accepted(dlg):
         return
     name = ed_name.text().strip()
     if not name:
@@ -107,8 +107,6 @@ def show_add_page_dialog(win: MainWindow) -> None:
 
 
 def on_duplicate_page(win: MainWindow, source_name: str) -> None:
-    from logic_cad.core.pages.page_order import validate_paper_layout_name
-
     default = win._diagram.layouts.suggest_next_layout_name()
     name, ok = QInputDialog.getText(
         win,
@@ -140,16 +138,13 @@ def on_duplicate_page(win: MainWindow, source_name: str) -> None:
 
 
 def on_delete_page(win: MainWindow, name: str) -> None:
-    ret = QMessageBox.question(
+    if not question_yes_no(
         win,
         "ページの削除",
         f"ページ「{name}」を削除しますか？\n\n"
         "このレイアウト上のシンボル・配線はすべて失われます。\n"
         "他のページからこのページへのページ跨ぎリンクも削除されます。",
-        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        QMessageBox.StandardButton.No,
-    )
-    if ret != QMessageBox.StandardButton.Yes:
+    ):
         return
     try:
         with win._diagram.begin("delete_page"):
@@ -164,9 +159,7 @@ def on_delete_page(win: MainWindow, name: str) -> None:
 
 def on_page_properties(win: MainWindow, layout_name: str) -> None:
     meta = read_page_meta(win._diagram.doc, layout_name)
-    dlg = QDialog(win)
-    dlg.setWindowTitle(f"ページのプロパティ — {layout_name}")
-    layout = QVBoxLayout(dlg)
+    dlg, layout, buttons = create_ok_cancel_dialog(win, f"ページのプロパティ — {layout_name}")
     form = QFormLayout()
     ed_name = QLineEdit(layout_name)
     ed_desc = QLineEdit(meta.get("page_desc", ""))
@@ -178,11 +171,8 @@ def on_page_properties(win: MainWindow, layout_name: str) -> None:
         rev_editor=ed_rev,
     )
     layout.addLayout(form)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.accepted.connect(dlg.accept)
-    buttons.rejected.connect(dlg.reject)
     layout.addWidget(buttons)
-    if dlg.exec() != QDialog.DialogCode.Accepted:
+    if not dialog_exec_accepted(dlg):
         return
     new_name = ed_name.text().strip()
     if not new_name:
@@ -229,8 +219,6 @@ def navigate_to_page_link(win: MainWindow, page_name: str, focus_peer_uid: str |
     win._props.clear_selection()
 
     def _go() -> None:
-        from logic_cad.ui.items.symbol_item import SymbolItem
-
         fp = (focus_peer_uid or "").strip()
         if fp:
             target: QRectF | None = None
@@ -251,8 +239,6 @@ def navigate_to_inpage_peer(win: MainWindow, peer_uid: str) -> None:
     """Pan the view so the INPAGE_REF partner (*peer_uid*) is visible on the current page."""
 
     def _go() -> None:
-        from logic_cad.ui.items.symbol_item import SymbolItem
-
         if not peer_uid.strip():
             return
         target: QRectF | None = None
@@ -273,8 +259,6 @@ def center_view_on_current_page_content(win: MainWindow, *, prefer_page_refs: bo
     """Keep zoom; pan so content is centered (PAGE_REF-only rect when jumping via link)."""
 
     def _go() -> None:
-        from logic_cad.ui.items.symbol_item import SymbolItem
-
         br = win._scene.itemsBoundingRect()
         if prefer_page_refs:
             rects: list[QRectF] = []

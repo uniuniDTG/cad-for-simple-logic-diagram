@@ -7,15 +7,12 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QFormLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QSpinBox,
-    QVBoxLayout,
 )
 
 from logic_cad.core.logic_diagram import LogicDiagram
@@ -25,6 +22,11 @@ from logic_cad.core.pages.page_layout_meta import (
     read_drawing_page_start,
     read_drawing_page_total_override,
 )
+from logic_cad.ui.dialog_helpers import (
+    create_ok_cancel_dialog,
+    dialog_exec_accepted,
+)
+from logic_cad.ui.preferred_font_dialog import run_preferred_font_dialog
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -179,17 +181,13 @@ def save_document_as(win: MainWindow) -> None:
 def preferred_font_settings(win: MainWindow) -> None:
     """Open project preferred font dialog (LD_DOC XDATA)."""
 
-    from logic_cad.ui.preferred_font_dialog import run_preferred_font_dialog
-
     if run_preferred_font_dialog(win, win._diagram):
         win._refresh_scene()
 
 
 def drawing_properties(win: MainWindow) -> None:
     cur = read_drawing_number(win._diagram.doc)
-    dlg = QDialog(win)
-    dlg.setWindowTitle("図面プロパティ")
-    layout = QVBoxLayout(dlg)
+    dlg, layout, buttons = create_ok_cancel_dialog(win, "図面プロパティ")
     form = QFormLayout()
     ed_no = QLineEdit(cur)
     form.addRow("図面番号（全ページの {{DWG_NO}} / $PROJECTNAME）", ed_no)
@@ -214,11 +212,8 @@ def drawing_properties(win: MainWindow) -> None:
     hint.setObjectName("hint")
     hint.setWordWrap(True)
     layout.addWidget(hint)
-    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
-    buttons.accepted.connect(dlg.accept)
-    buttons.rejected.connect(dlg.reject)
     layout.addWidget(buttons)
-    if dlg.exec() != QDialog.DialogCode.Accepted:
+    if not dialog_exec_accepted(dlg):
         return
     total_pages: int | None
     if ed_total.value() == 0:

@@ -7,11 +7,13 @@ from dataclasses import dataclass, field
 from ezdxf.document import Drawing
 from ezdxf.math import Vec3
 
+from logic_cad.core.geometry.manhattan_metrics import manhattan_distance
 from logic_cad.core.model.connection_graph import ConnectionGraph
 from logic_cad.core.model.constants import ENTITY_TYPE_CHECKPOINT, ENTITY_TYPE_WIRE_BRANCH
 from logic_cad.core.model.port_key import is_input_port_key, parse_port_layer
 from logic_cad.core.model.wire_layers import is_wire_layer
 from logic_cad.core.model.xdata import get_type, get_uid, read_ld_app_dict
+from logic_cad.core.paper_layout_access import paper_layout_block
 from logic_cad.core.services.dynamic_gate_factory import gate_view_geometry_from_block_name
 
 
@@ -34,17 +36,20 @@ def _world_manhattan_escape(
         (px, py - escape_mm),
     ]
 
-    def manh(a: tuple[float, float], b: tuple[float, float]) -> float:
-        return abs(a[0] - b[0]) + abs(a[1] - b[1])
-
     sign = -1.0 if prefer_left else 1.0
     tx, ty = px + sign * ux * escape_mm, py + sign * uy * escape_mm
     if toward is not None:
         if toward_first:
-            return min(cands, key=lambda c: (manh(c, toward), manh(c, (tx, ty))))
+            return min(
+                cands,
+                key=lambda c: (manhattan_distance(c, toward), manhattan_distance(c, (tx, ty))),
+            )
         # Keep the first leg outside the symbol, then bias toward the route target.
-        return min(cands, key=lambda c: (manh(c, (tx, ty)), manh(c, toward)))
-    return min(cands, key=lambda c: manh(c, (tx, ty)))
+        return min(
+            cands,
+            key=lambda c: (manhattan_distance(c, (tx, ty)), manhattan_distance(c, toward)),
+        )
+    return min(cands, key=lambda c: manhattan_distance(c, (tx, ty)))
 
 
 @dataclass
@@ -82,7 +87,7 @@ class IndexStore:
         if layout is None or layout.is_modelspace:
             self.issues.append(f"Invalid layout {layout_name!r}")
             return
-        blk = doc.blocks.get(layout.block_record_name)
+        blk = paper_layout_block(doc, layout_name)
 
         for e in blk:
             uid = get_uid(e)
@@ -213,7 +218,7 @@ class IndexStore:
             (px, py + step),
             (px, py - step),
         ]
-        return min(cands, key=lambda c: abs(c[0] - tx) + abs(c[1] - ty))
+        return min(cands, key=lambda c: manhattan_distance(c, (tx, ty)))
 
     def port_unit_from_key(self, port_key: str) -> str | None:
         parts = port_key.split("_", 1)

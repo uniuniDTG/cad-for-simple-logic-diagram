@@ -17,6 +17,9 @@ from PySide6.QtGui import (
     QTransform,
 )
 
+from ezdxf import bbox
+from ezdxf.path import make_path
+
 if TYPE_CHECKING:
     from ezdxf.document import Drawing
 
@@ -598,8 +601,6 @@ def block_scaled_bounds(
     if not geoms:
         return None
     try:
-        from ezdxf import bbox
-
         e = bbox.extents(geoms)
     except Exception:
         return None
@@ -637,12 +638,10 @@ def block_scaled_bounds_with_instance(
         return None
     blk = doc.blocks.get(block_name)
     try:
-        from ezdxf import bbox as dxf_bbox
-
         non_attdef = [
             e for e in blk if e.dxftype() != "ATTDEF" and str(e.dxf.layer) != LAYER_CONTENTS_AREA
         ]
-        e = dxf_bbox.extents(non_attdef) if non_attdef else None
+        e = bbox.extents(non_attdef) if non_attdef else None
     except Exception:
         e = None
 
@@ -717,8 +716,6 @@ def paint_block_hatches(
     scale_y: float = 1.0,
     flatten: float = 0.35,
 ) -> bool:
-    from ezdxf.path import make_path
-
     if block_name not in doc.blocks:
         return False
     blk = doc.blocks.get(block_name)
@@ -765,8 +762,6 @@ def paint_block_strokes(
     flatten: float = 0.35,
     stroke_color_override: QColor | None = None,
 ) -> bool:
-    from ezdxf.path import make_path
-
     if block_name not in doc.blocks:
         return False
     blk = doc.blocks.get(block_name)

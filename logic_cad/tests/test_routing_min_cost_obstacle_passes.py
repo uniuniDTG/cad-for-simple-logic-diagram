@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from logic_cad.core.model.constants import GRID_PITCH
+from logic_cad.core.model.constants import GRID_PITCH, WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS
+from logic_cad.core.model.wire_port_helpers import wire_allows_orthogonal_cross
 from logic_cad.core.routing.constrained_router import route_manhattan_ovg_layers
 from logic_cad.core.routing.profile import DEFAULT_ROUTING_PROFILE
 from logic_cad.core.routing.scoring import path_length
@@ -57,15 +58,10 @@ def test_early_return_first_pass_when_min_cost_off() -> None:
 
 
 def test_wire_allows_orthogonal_cross_default_false() -> None:
-    from logic_cad.core.model.wire_port_helpers import wire_allows_orthogonal_cross
-
     assert not wire_allows_orthogonal_cross({})
     assert not wire_allows_orthogonal_cross({"allow_orthogonal_cross": "0"})
 
 
 def test_wire_allows_orthogonal_cross_truthy() -> None:
-    from logic_cad.core.model.constants import WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS
-    from logic_cad.core.model.wire_port_helpers import wire_allows_orthogonal_cross
-
     assert wire_allows_orthogonal_cross({WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS: "1"})
     assert wire_allows_orthogonal_cross({WIRE_XDATA_ALLOW_ORTHOGONAL_CROSS: "true"})

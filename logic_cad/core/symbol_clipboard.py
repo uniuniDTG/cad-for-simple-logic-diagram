@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from logic_cad.core.model.constants import (
+    ENTITY_TYPE_USER_ARC,
     ENTITY_TYPE_USER_CIRCLE,
     ENTITY_TYPE_USER_CLOUD,
     ENTITY_TYPE_USER_LINE,
@@ -15,7 +16,7 @@ from logic_cad.core.model.constants import (
 
 @dataclass
 class UserSketchCopyRecord:
-    """LINE / CIRCLE (LD_USER_LINE_* / LD_USER_CIRCLE_*) or TEXT (LD_ANNOTATION) user sketch."""
+    """LINE / CIRCLE / ARC (LD_USER_* ) or TEXT (LD_ANNOTATION) user sketch."""
 
     entity_type: str
     linetype: str = LINETYPE_CONTINUOUS
@@ -23,6 +24,10 @@ class UserSketchCopyRecord:
     line_end: tuple[float, float] | None = None
     circle_center: tuple[float, float] | None = None
     circle_radius: float = 0.0
+    arc_center: tuple[float, float] | None = None
+    arc_radius: float = 0.0
+    arc_start_angle_deg: float = 0.0
+    arc_end_angle_deg: float = 0.0
     text_insert: tuple[float, float] = (0.0, 0.0)
     text: str = ""
     text_height_mm: float = 4.0
@@ -41,6 +46,12 @@ class UserSketchCopyRecord:
             if self.circle_center is not None and self.circle_radius > 0:
                 cx, cy = self.circle_center
                 r = self.circle_radius
+                xs.extend([cx - r, cx + r])
+                ys.extend([cy - r, cy + r])
+        elif self.entity_type == ENTITY_TYPE_USER_ARC:
+            if self.arc_center is not None and self.arc_radius > 0:
+                cx, cy = self.arc_center
+                r = self.arc_radius
                 xs.extend([cx - r, cx + r])
                 ys.extend([cy - r, cy + r])
         elif self.entity_type == ENTITY_TYPE_USER_TEXT:

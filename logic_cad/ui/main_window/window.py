@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import logging
-from PySide6.QtCore import QPoint, QTimer, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut, QShowEvent
+import math
 from pathlib import Path
 
+from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QShortcut, QShowEvent
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
+    QGraphicsEllipseItem,
     QLabel,
     QMainWindow,
     QMenu,
-    QMessageBox,
     QStackedWidget,
     QStatusBar,
     QVBoxLayout,
@@ -21,6 +22,18 @@ from PySide6.QtWidgets import (
 )
 
 from logic_cad.core.logic_diagram import LogicDiagram
+from logic_cad.core.model.constants import ENTITY_TYPE_USER_LINE
+from logic_cad.core.model.user_sketch_layers import (
+    normalize_user_sketch_linetype,
+    user_sketch_display_linetype_for_entity,
+)
+from logic_cad.core.model.xdata import get_type
+from logic_cad.core.services.layout_service import (
+    apply_frame_template_from_path,
+    reload_symbol_library,
+    validate_frame_template_path,
+)
+from logic_cad.core.undo.history import find_entity_by_uid
 from . import (
     clipboard_actions,
     document_actions,
@@ -42,11 +55,14 @@ from logic_cad.ui.panels.block_edit_panel import BlockEditPanel
 from logic_cad.ui.symbol_block_editor import SymbolBlockEditScene, SymbolBlockEditView
 from logic_cad.ui.symbol_block_editor.scene import (
     ITEM_KIND_ATTDEF,
+    ITEM_KIND_BLOCK_MTEXT,
+    ITEM_KIND_BLOCK_TEXT,
     ITEM_KIND_GEOM,
     ITEM_KIND_PORT,
     PORT_LAYER_TAKEN_MESSAGE,
 )
 from logic_cad.ui.scene import DiagramScene
+from logic_cad.ui.dialog_helpers import dialog_exec_accepted, question_yes_no, raise_modeless
 from logic_cad.ui.layer_lineweight_dialog import LayerLineweightDialog
 from logic_cad.ui.styles import APP_STYLESHEET
 from logic_cad.ui.toast import show_toast
@@ -56,11 +72,7 @@ from logic_cad.ui.panels.symbol_library_dialog import SymbolLibraryDialog
 from logic_cad.ui.panels.log_window_dialog import LogWindowDialog
 from logic_cad.ui.user_settings_dialog import run_user_settings_dialog
 from logic_cad.ui.find_replace_dialog import FindReplaceDialog
-from logic_cad.core.services.layout_service import (
-    apply_frame_template_from_path,
-    reload_symbol_library,
-    validate_frame_template_path,
-)
+from logic_cad.ui.items.user_geometry_items import UserArcItem, UserCircleItem, UserLineItem
 
 _TEMPLATE_VALIDATION_LOGGER = logging.getLogger("logic_cad.validation.template")
 
@@ -71,6 +83,7 @@ class MainWindow(QMainWindow):
     _block_panel: BlockEditPanel
     _block_scene: SymbolBlockEditScene
     _block_view: SymbolBlockEditView
+    _sketch_tools_widget: QWidget
 
     def __init__(self) -> None:
         super().__init__()
@@ -80,8 +93,10 @@ class MainWindow(QMainWindow):
         _tb = create_wire_sketch_tool_buttons(self)
         self._btn_auto_wire = _tb.auto_wire
         self._btn_manual_wire = _tb.manual_wire
+        self._sketch_tools_widget = _tb.sketch_tools_widget
         self._btn_sk_line = _tb.sk_line
         self._btn_sk_circle = _tb.sk_circle
+        self._btn_sk_arc = _tb.sk_arc
         self._btn_sk_cloud = _tb.sk_cloud
         self._btn_sk_text = _tb.sk_text
 
@@ -92,6 +107,7 @@ class MainWindow(QMainWindow):
             self._btn_manual_wire,
             self._btn_sk_line,
             self._btn_sk_circle,
+            self._btn_sk_arc,
             self._btn_sk_cloud,
             self._btn_sk_text,
         )
@@ -103,12 +119,7 @@ class MainWindow(QMainWindow):
         self._scene.set_clipboard_callbacks(self._copy_symbol_selection, self._paste_symbol_clipboard)
         self._scene.selectionChanged.connect(self._on_selection_changed)
 
-        self._btn_auto_wire.toggled.connect(self._tool_bridge.on_auto_wire_toggled)
-        self._btn_manual_wire.toggled.connect(self._tool_bridge.on_manual_wire_toggled)
-        self._btn_sk_line.toggled.connect(self._tool_bridge.on_any_sketch_toggled)
-        self._btn_sk_circle.toggled.connect(self._tool_bridge.on_any_sketch_toggled)
-        self._btn_sk_cloud.toggled.connect(self._tool_bridge.on_any_sketch_toggled)
-        self._btn_sk_text.toggled.connect(self._tool_bridge.on_any_sketch_toggled)
+        self._tool_bridge.connect_toolbar_signals()
 
         self._btn_sk_line.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._btn_sk_line.customContextMenuRequested.connect(self._on_sk_line_linetype_menu)
@@ -282,7 +293,12 @@ class MainWindow(QMainWindow):
         label = {"CONTINUOUS": "実線", "DASHED": "点線", "CENTER": "中心線"}.get(lt, lt)
         self._btn_sk_line.setToolTip(
             "直線ツール: 2点で描画（グリッド）。Shift で水平/垂直に拘束。\n"
-            f"次の線種: {label}（{lt}）。右クリックで変更。配置後はプロパティでも変更可。"
+            f"次の線種: {label}（{lt}）。右クリックで変更。円弧ツールも同じ線種を使用。\n"
+            "配置後はプロパティでも変更可。"
+        )
+        self._btn_sk_arc.setToolTip(
+            "円弧ツール: 開始→弧上の点→終了の3点（グリッド）。\n"
+            f"線種は直線ツールと共通: {label}（{lt}）。直線ボタンを右クリックで変更。"
         )
 
     def _on_sk_line_linetype_menu(self, pos: QPoint) -> None:
@@ -414,14 +430,11 @@ class MainWindow(QMainWindow):
         if not path_str:
             return
         path = Path(path_str)
-        ret = QMessageBox.question(
+        if not question_yes_no(
             self,
             "図枠テンプレートを適用",
             f"選択したファイルの図枠（ブロック定義と各用紙ページの図枠）に置き換えます。\n\n{path.name}\n\n続行しますか？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if ret != QMessageBox.StandardButton.Yes:
+        ):
             return
 
         try:
@@ -439,17 +452,14 @@ class MainWindow(QMainWindow):
             excerpt = "\n".join(f"- {msg}" for msg in issues[:8])
             if len(issues) > 8:
                 excerpt += f"\n... 他 {len(issues) - 8} 件"
-            ret_issue = QMessageBox.question(
+            if not question_yes_no(
                 self,
                 "図枠テンプレート検証",
                 "テンプレート検証で問題が見つかりました。\n"
                 "適用すると既存図面に不整合を持ち込む可能性があります。\n\n"
                 f"{excerpt}\n\n"
                 "警告を許容して続行しますか？",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if ret_issue != QMessageBox.StandardButton.Yes:
+            ):
                 show_toast("図枠テンプレート適用をキャンセルしました。", parent_window=self)
                 return
 
@@ -481,15 +491,12 @@ class MainWindow(QMainWindow):
         if not path_str:
             return
         path = Path(path_str)
-        ret = QMessageBox.question(
+        if not question_yes_no(
             self,
             "シンボルライブラリを読み込み",
             f"選択した DXF からブロック定義を取り込み直します。\n"
             f"同名ブロックはライブラリの内容で置き換わります。\n\n{path.name}\n\n続行しますか？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if ret != QMessageBox.StandardButton.Yes:
+        ):
             return
         try:
             reload_symbol_library(self._diagram.doc, path=path)
@@ -508,44 +515,32 @@ class MainWindow(QMainWindow):
         show_toast(f"シンボルライブラリを読み込みました: {path.name}", parent_window=self)
 
     def _show_symbol_library(self) -> None:
-
-
         if self._symbol_library_dialog is None:
             self._symbol_library_dialog = SymbolLibraryDialog(lambda: self._diagram.doc, parent=self)
         self._symbol_library_dialog.refresh_from_document()
-        self._symbol_library_dialog.show()
-        self._symbol_library_dialog.raise_()
-        self._symbol_library_dialog.activateWindow()
+        raise_modeless(self._symbol_library_dialog)
 
     def _show_manual(self) -> None:
         if self._manual_dialog is None:
             self._manual_dialog = ManualDialog(parent=self)
         self._manual_dialog.refresh()
-        self._manual_dialog.show()
-        self._manual_dialog.raise_()
-        self._manual_dialog.activateWindow()
+        raise_modeless(self._manual_dialog)
 
     def _show_log_window(self) -> None:
         if self._log_dialog is None:
             self._log_dialog = LogWindowDialog(parent=self)
-        self._log_dialog.show()
-        self._log_dialog.raise_()
-        self._log_dialog.activateWindow()
+        raise_modeless(self._log_dialog)
 
     def _reload_symbol_library(self) -> None:
         if not self._block_panel.request_end_session_for_nav():
             return
-        ret = QMessageBox.question(
+        if not question_yes_no(
             self,
             "シンボルライブラリを再読み込み",
             "logic_cad/assets/symbol_library.dxf からブロック定義を取り込み直します。\n"
             "同名ブロックはライブラリの内容で置き換わります。続行しますか？",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if ret != QMessageBox.StandardButton.Yes:
+        ):
             return
-
 
         try:
             reload_symbol_library(self._diagram.doc)
@@ -565,7 +560,7 @@ class MainWindow(QMainWindow):
 
     def _edit_layer_lineweight(self) -> None:
         dlg = LayerLineweightDialog(self._diagram, self)
-        if dlg.exec() == dlg.DialogCode.Accepted and dlg.changed():
+        if dialog_exec_accepted(dlg) and dlg.changed():
             self._update_window_title()
             self._refresh_scene()
 
@@ -588,10 +583,7 @@ class MainWindow(QMainWindow):
 
     def _show_find(self) -> None:
         """Open modeless find: jump to hits while keeping the canvas editable (Ctrl+F)."""
-        dlg = self._ensure_find_dialog()
-        dlg.show()
-        dlg.raise_()
-        dlg.activateWindow()
+        raise_modeless(self._ensure_find_dialog())
 
     def _show_replace(self) -> None:
         """Open find/replace for SYM/LABEL* and user annotation text."""
@@ -668,14 +660,6 @@ class MainWindow(QMainWindow):
         page_actions.navigate_to_inpage_peer(self, peer_uid)
 
     def _on_block_selection_changed(self) -> None:
-        from PySide6.QtWidgets import QGraphicsEllipseItem
-
-        from logic_cad.core.model.constants import ENTITY_TYPE_USER_LINE
-        from logic_cad.core.model.user_sketch_layers import user_sketch_display_linetype_for_entity
-        from logic_cad.core.model.xdata import get_type
-        from logic_cad.core.undo.history import find_entity_by_uid
-        from logic_cad.ui.items.user_geometry_items import UserCircleItem, UserLineItem
-
         if self._page_tabs.currentIndex() != 2:
             return
         sess = self._block_panel.session()
@@ -694,7 +678,7 @@ class MainWindow(QMainWindow):
                 self._props.show_multi(len(sel))
             return
         it = sel[0]
-        bname = sess.block_name
+        bname = sess.scratch_definition_name()
         if isinstance(it, UserLineItem):
             ent = find_entity_by_uid(sess.scratch_doc, it.sketch_uid)
             if ent is None:
@@ -742,6 +726,30 @@ class MainWindow(QMainWindow):
             )
             return
 
+        if isinstance(it, UserArcItem):
+            ent = find_entity_by_uid(sess.scratch_doc, it.sketch_uid)
+            if ent is None:
+                self._props.clear_selection()
+                return
+            lt = user_sketch_display_linetype_for_entity(ent)
+            det = (
+                f"タイプ: USER_ARC\n"
+                f"UUID: {it.sketch_uid}\n"
+                f"表示線種: {lt}\n"
+                f"{MainWindow._block_geom_property_detail(ent)}"
+            )
+            self._props.show_block_edit_geom(
+                block_name=bname,
+                handle=str(ent.dxf.handle),
+                dxftype="USER_ARC",
+                layer=str(ent.dxf.layer),
+                detail=det,
+                editable_linetype=lt,
+                linetype_subject="user_sketch",
+                sketch_uid=it.sketch_uid,
+            )
+            return
+
         h = str(it.data(0) or "")
         kind = str(it.data(1) or "")
         ent = None
@@ -773,6 +781,36 @@ class MainWindow(QMainWindow):
                 height_mm=float(getattr(ent.dxf, "height", 2.5) or 2.5),
             )
             return
+        if kind == ITEM_KIND_BLOCK_TEXT and ent.dxftype() == "TEXT":
+            ha = int(getattr(ent.dxf, "halign", 0) or 0)
+            self._props.show_block_edit_scratch_text(
+                block_name=bname,
+                handle=h,
+                is_mtext=False,
+                text=str(ent.dxf.text or ""),
+                height_mm=float(getattr(ent.dxf, "height", 2.5) or 2.5),
+                rotation_deg=float(getattr(ent.dxf, "rotation", 0.0) or 0.0),
+                halign=ha,
+            )
+            return
+        if kind == ITEM_KIND_BLOCK_MTEXT and ent.dxftype() == "MTEXT":
+            try:
+                body = ent.plain_text()
+            except Exception:
+                body = str(getattr(ent.dxf, "text", "") or "")
+            if isinstance(body, list):
+                body = "\n".join(str(x) for x in body)
+            self._props.show_block_edit_scratch_text(
+                block_name=bname,
+                handle=h,
+                is_mtext=True,
+                text=str(body),
+                height_mm=float(getattr(ent.dxf, "char_height", 2.5) or 2.5),
+                rotation_deg=float(getattr(ent.dxf, "rotation", 0.0) or 0.0),
+                width_mm=float(getattr(ent.dxf, "width", 0.0) or 0.0),
+                attachment_point=int(getattr(ent.dxf, "attachment_point", 1) or 1),
+            )
+            return
         if kind == ITEM_KIND_GEOM:
             detail = MainWindow._block_geom_property_detail(ent)
             lt_val: str | None = None
@@ -796,8 +834,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _block_native_line_display_linetype(ent: object) -> str:
-        from logic_cad.core.model.user_sketch_layers import normalize_user_sketch_linetype
-
         lt_raw = str(getattr(ent.dxf, "linetype", "") or "").strip()
         if not lt_raw or lt_raw.upper() in ("BYLAYER", "BYBLOCK"):
             return "CONTINUOUS"
@@ -805,8 +841,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _block_geom_property_detail(ent: object) -> str:
-        import math
-
         et = ent.dxftype()  # type: ignore[union-attr]
         if et == "LINE":
             x0, y0 = float(ent.dxf.start.x), float(ent.dxf.start.y)  # type: ignore[union-attr]

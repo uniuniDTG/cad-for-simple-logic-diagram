@@ -8,7 +8,7 @@ from typing import Any
 from ezdxf.document import Drawing
 
 from logic_cad.core.undo.entity_serialize import snapshot_graphic_entities
-from logic_cad.core.undo.history import HistoryService
+from logic_cad.core.undo.history import HistoryService, apply_delta
 from logic_cad.core.undo.transaction import compute_delta
 
 
@@ -59,7 +59,6 @@ class ScratchDocumentTransaction:
     def rollback(self) -> None:
         if self._before is None or self._rolled_back:
             return
-        from logic_cad.core.undo.history import apply_delta
 
         after = snapshot_graphic_entities(self._doc)
         delta = compute_delta(self._label, self._layout_name, self._before, after, self._doc)

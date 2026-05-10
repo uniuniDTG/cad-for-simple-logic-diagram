@@ -52,7 +52,6 @@ from logic_cad.core.undo.transaction import DocumentTransaction
 from logic_cad.core.model.xdata import (
     build_ld_app_tags,
     get_type,
-    get_uid,
     read_ld_app_dict,
     set_entity_xdata,
 )
@@ -60,6 +59,10 @@ from logic_cad.core.pages.page_layout_meta import read_page_meta, merge_layout_p
 from logic_cad.core.services.toc_frame_service import refresh_frame_for_layout
 from logic_cad.core.services.toc_frame_service import regenerate_toc as _reg
 from logic_cad.core.services.toc_frame_service import refresh_all_frame_captions
+from logic_cad.core.logic_diagram_clipboard import (
+    build_symbol_clipboard_payload as _build_symbol_clipboard_payload,
+    paste_symbol_clipboard_payload as _paste_symbol_clipboard_payload,
+)
 from logic_cad.core.symbol_clipboard import SymbolClipboardPayload
 
 class RerouteAfterGeometryChangeError(Exception):
@@ -324,77 +327,14 @@ class LogicDiagram:
 
     def build_symbol_clipboard_payload(
         self, symbol_uids: list[str], user_sketch_uids: list[str] | None = None
-    ):
-
-
-        layout = self.current_layout_name
-        user_sketch_uids = user_sketch_uids or []
-        symbols = []
-        for u in symbol_uids:
-            if not u:
-                continue
-            rec = self.symbols.clipboard_record_for_insert(layout, u)
-            if rec is not None:
-                symbols.append(rec)
-        uid_set = {rec.source_uid for rec in symbols}
-        wires = self.wires.clipboard_records_internal_wires(layout, uid_set)
-        sketches = []
-        for u in user_sketch_uids:
-            if not u:
-                continue
-            sr = self.user_geom.clipboard_record_for_uid(u)
-            if sr is not None:
-                sketches.append(sr)
-        return SymbolClipboardPayload(symbols=symbols, wires=wires, user_sketches=sketches)
+    ) -> SymbolClipboardPayload:
+        return _build_symbol_clipboard_payload(self, symbol_uids, user_sketch_uids)
 
     def paste_symbol_clipboard_payload(
-        self, payload, anchor_dxf: tuple[float, float]
+        self, payload: SymbolClipboardPayload, anchor_dxf: tuple[float, float]
     ) -> tuple[list[str], list[str]]:
         """Paste symbols/wires and/or user sketches; return (new INSERT uids, new sketch uids)."""
-
-
-        layout = self.current_layout_name
-        if not payload.symbols and not payload.user_sketches:
-            return [], []
-        minx, miny = payload.bbox_min()
-        minx, miny = snap_to_grid(minx, miny)
-        ax, ay = snap_to_grid(float(anchor_dxf[0]), float(anchor_dxf[1]))
-        dx, dy = ax - minx, ay - miny
-        pasted_syms: list[str] = []
-        old_to_new: dict[str, str] = {}
-        if payload.symbols:
-            for rec in payload.symbols:
-                pos = snap_to_grid(rec.insert[0] + dx, rec.insert[1] + dy)
-                nu = self.symbols.paste_insert_from_clipboard(layout, rec, pos)
-                old_to_new[rec.source_uid] = nu
-                pasted_syms.append(nu)
-            self.rebuild_index()
-            for wrec in payload.wires:
-                self.wires.paste_wire_from_clipboard(layout, wrec, old_to_new, (dx, dy))
-            self.rebuild_index()
-            self.wires.recompute_all_bridges_ordered(layout)
-            for nu in pasted_syms:
-                ins = self.symbols.insert_by_uid(layout, nu)
-                if ins is None:
-                    continue
-                if get_type(ins) != ENTITY_TYPE_INPAGE_REF:
-                    continue
-                d = read_ld_app_dict(ins)
-                p = (d.get(PEER_UID_XDATA) or "").strip()
-                if p in old_to_new:
-                    p2 = old_to_new[p]
-                    uid_str = str(d.get("uid") or get_uid(ins) or "")
-                    extra = {k: v for k, v in d.items() if k not in ("ver", "uid", "type")}
-                    extra[PEER_UID_XDATA] = p2
-                    set_entity_xdata(ins, build_ld_app_tags("1", uid_str, ENTITY_TYPE_INPAGE_REF, extra))
-            refresh_inpage_ref_syms_on_layout(self.doc, layout)
-        pasted_sk: list[str] = []
-        if payload.user_sketches:
-            for ur in payload.user_sketches:
-                nu = self.user_geom.paste_sketch_record(layout, ur, dx, dy)
-                pasted_sk.append(nu)
-            self.rebuild_index()
-        return pasted_syms, pasted_sk
+        return _paste_symbol_clipboard_payload(self, payload, anchor_dxf)
 
     def _on_transaction_begin(self, label: str) -> None:
         if label != "delete":
@@ -525,11 +465,11 @@ class LogicDiagram:
         self.rebuild_index()
 
     def set_gate_show_input_stub_in_arrow(self, uid: str, show: bool) -> None:
-        """Show or hide WIRE-style IN arrows at each AND/OR input stub root (symbol side).
+        """Show or hide WIRE-style IN arrows at each AND/OR input stub root (DXF-visible).
 
         Args:
             uid: INSERT entity uid for an AND or OR gate.
-            show: If True, persist XDATA so the editor draws stub-root arrows.
+            show: If True, persist XDATA and layout ``GATE_INPUT_STUB_ARROW`` LW polylines.
 
         Returns:
             None
@@ -762,6 +702,31 @@ class LogicDiagram:
         self.symbols.set_inpage_sym_height(self.current_layout_name, uid, height_mm)
         self.rebuild_index()
 
+    def set_inpage_ref_link_display(
+        self,
+        uid: str,
+        *,
+        link_name_auto: bool,
+        display_text: str = "",
+    ) -> None:
+        """Set INPAGE_REF link label mode for the current page (both ends when paired).
+
+        Args:
+            uid: One INSERT uid of the pair.
+            link_name_auto: Use automatic ※ labels among auto pairs, or fixed manual text.
+            display_text: Manual label when *link_name_auto* is False.
+
+        Raises:
+            ValueError: Passed through from :class:`SymbolService`.
+        """
+        self.symbols.set_inpage_ref_link_display(
+            self.current_layout_name,
+            uid,
+            link_name_auto=link_name_auto,
+            display_text=display_text,
+        )
+        self.rebuild_index()
+
     def set_page_ref(self, uid: str, target_layout: str) -> None:
         self.symbols.set_page_ref(self.current_layout_name, uid, target_layout, self.list_pages())
         self.rebuild_index()
@@ -812,6 +777,25 @@ class LogicDiagram:
         linetype: str,
     ) -> str:
         uid = self.user_geom.add_circle(self.current_layout_name, center, radius, linetype)
+        self.rebuild_index()
+        return uid
+
+    def add_user_arc(
+        self,
+        center: tuple[float, float],
+        radius: float,
+        start_angle_deg: float,
+        end_angle_deg: float,
+        linetype: str,
+    ) -> str:
+        uid = self.user_geom.add_arc(
+            self.current_layout_name,
+            center,
+            radius,
+            start_angle_deg,
+            end_angle_deg,
+            linetype,
+        )
         self.rebuild_index()
         return uid
 
@@ -963,6 +947,8 @@ class LogicDiagram:
         page_ref_layout: str | None = None
         if e.dxftype() == "INSERT" and get_type(e) == "PAGE_REF":
             page_ref_layout = layout_name_for_insert(self.doc, e)
+        if e.dxftype() == "INSERT" and get_type(e) in ("AND", "OR"):
+            self.symbols.remove_gate_stub_arrow_children(self.current_layout_name, uid)
         destroy_entity(self.doc, e)
         if page_ref_layout is not None:
             refresh_page_ref_syms_on_layout(self.doc, page_ref_layout)

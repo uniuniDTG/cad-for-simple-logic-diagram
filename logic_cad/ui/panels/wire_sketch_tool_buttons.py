@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QSize
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QVBoxLayout, QWidget
 
 from logic_cad.ui.sketch_tool_icons import (
+    sketch_arc_icon,
     sketch_circle_icon,
     sketch_cloud_icon,
     sketch_line_icon,
@@ -22,15 +23,31 @@ _SK_ICO = QSize(24, 24)
 
 @dataclass(frozen=True)
 class WireSketchToolButtons:
+    """Factory result: wire + sketch controls and the sketch strip widget for the palette."""
+
     auto_wire: QPushButton
     manual_wire: QPushButton
+    sketch_tools_widget: QWidget
     sk_line: QPushButton
     sk_circle: QPushButton
+    sk_arc: QPushButton
     sk_cloud: QPushButton
     sk_text: QPushButton
 
 
 def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketchToolButtons:
+    """Create wire-routing buttons and a two-row sketch tool strip (雲・テキストは下段).
+
+    Row 1: 直線・円・円弧。Row 2: 雲マーク・テキスト。
+    ``sketch_tools_widget`` をパレットに ``addWidget`` する（各ボタンは主窓ではなく
+    ストリップを親に持つ）。
+
+    Args:
+        parent: ルートの親（未使用でも可）。ストリップ用 ``QWidget`` はレイアウト投入時に親が決まる。
+
+    Returns:
+        ボタン参照と ``sketch_tools_widget``。
+    """
     btn_auto = QPushButton("  自動配線", parent)
     btn_auto.setCheckable(True)
     btn_auto.setChecked(False)
@@ -52,7 +69,18 @@ def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketch
         " AND/OR 入力の一括最適化の対象外（シンボル移動時は通常どおり再配線）。"
     )
 
-    btn_sk_line = QPushButton(parent)
+    sketch_tools = QWidget()
+    sk_outer = QVBoxLayout(sketch_tools)
+    sk_outer.setContentsMargins(0, 0, 0, 0)
+    sk_outer.setSpacing(4)
+    sk_row1 = QHBoxLayout()
+    sk_row1.setContentsMargins(0, 0, 0, 0)
+    sk_row1.setSpacing(4)
+    sk_row2 = QHBoxLayout()
+    sk_row2.setContentsMargins(0, 0, 0, 0)
+    sk_row2.setSpacing(4)
+
+    btn_sk_line = QPushButton(sketch_tools)
     btn_sk_line.setCheckable(True)
     btn_sk_line.setObjectName("sketchToolLine")
     btn_sk_line.setIcon(sketch_line_icon())
@@ -63,7 +91,7 @@ def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketch
     )
     btn_sk_line.setAccessibleName("直線")
 
-    btn_sk_circle = QPushButton(parent)
+    btn_sk_circle = QPushButton(sketch_tools)
     btn_sk_circle.setCheckable(True)
     btn_sk_circle.setObjectName("sketchToolCircle")
     btn_sk_circle.setIcon(sketch_circle_icon())
@@ -73,7 +101,19 @@ def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketch
     )
     btn_sk_circle.setAccessibleName("円")
 
-    btn_sk_cloud = QPushButton(parent)
+    btn_sk_arc = QPushButton(sketch_tools)
+    btn_sk_arc.setCheckable(True)
+    btn_sk_arc.setObjectName("sketchToolArc")
+    btn_sk_arc.setIcon(sketch_arc_icon())
+    btn_sk_arc.setIconSize(_SK_ICO)
+    btn_sk_arc.setToolTip(
+        "円弧ツール: 1点目＝開始、2点目＝弧上の点、3点目＝終了（グリッドスナップ）。"
+        " 1→2点の間は破線、2点目以降は弧のラバーバンドでプレビュー。"
+        " 直線ツールと同じ線種（ボタン右クリック）。右クリックで描き直し。"
+    )
+    btn_sk_arc.setAccessibleName("円弧")
+
+    btn_sk_cloud = QPushButton(sketch_tools)
     btn_sk_cloud.setCheckable(True)
     btn_sk_cloud.setObjectName("sketchToolCloud")
     btn_sk_cloud.setIcon(sketch_cloud_icon())
@@ -85,7 +125,7 @@ def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketch
     )
     btn_sk_cloud.setAccessibleName("雲マーク")
 
-    btn_sk_text = QPushButton(parent)
+    btn_sk_text = QPushButton(sketch_tools)
     btn_sk_text.setCheckable(True)
     btn_sk_text.setObjectName("sketchToolText")
     btn_sk_text.setIcon(sketch_text_icon())
@@ -96,11 +136,23 @@ def create_wire_sketch_tool_buttons(parent: QWidget | None = None) -> WireSketch
     )
     btn_sk_text.setAccessibleName("テキスト")
 
+    sk_row1.addWidget(btn_sk_line)
+    sk_row1.addWidget(btn_sk_circle)
+    sk_row1.addWidget(btn_sk_arc)
+    sk_row1.addStretch()
+    sk_row2.addWidget(btn_sk_cloud)
+    sk_row2.addWidget(btn_sk_text)
+    sk_row2.addStretch()
+    sk_outer.addLayout(sk_row1)
+    sk_outer.addLayout(sk_row2)
+
     return WireSketchToolButtons(
         auto_wire=btn_auto,
         manual_wire=btn_manual,
+        sketch_tools_widget=sketch_tools,
         sk_line=btn_sk_line,
         sk_circle=btn_sk_circle,
+        sk_arc=btn_sk_arc,
         sk_cloud=btn_sk_cloud,
         sk_text=btn_sk_text,
     )

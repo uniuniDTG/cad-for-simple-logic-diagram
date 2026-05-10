@@ -5,12 +5,14 @@ from pathlib import Path
 import ezdxf
 import pytest
 
-from logic_cad.core.model.constants import BLOCK_CHECKPOINT
+from logic_cad.core.model.constants import BLOCK_CHECKPOINT, BLOCK_WIRE_BRANCH
 from logic_cad.core.dxf.dxf_repository import new_document
 from logic_cad.core.services.dynamic_gate_factory import DynamicGateFactory
 from logic_cad.core.services.layout_service import (
     _iter_block_definition_names,
+    ensure_inpage_reference_blocks,
     import_symbol_library,
+    list_block_editor_block_names,
     list_palette_block_names,
     reload_symbol_library,
 )
@@ -91,13 +93,61 @@ def test_import_symbol_library_merges_blocks_from_file(tmp_path: Path) -> None:
     assert any(e.dxftype() == "LINE" for e in b)
 
 
+def test_symbol_library_page_link_blocks_define_page_name_page_desc_attdefs() -> None:
+    """Bundled library carries PAGE_NAME / PAGE_DESC ATTDEFs on PAGE_FROM / PAGE_TO (not block-name tags)."""
+    doc = new_document()
+    import_symbol_library(doc)
+    for bn in ("PAGE_FROM", "PAGE_TO"):
+        tags = {
+            str(e.dxf.tag).upper()
+            for e in doc.blocks.get(bn)
+            if e.dxftype() == "ATTDEF"
+        }
+        assert "PAGE_NAME" in tags
+        assert "PAGE_DESC" in tags
+        assert "PAGE_FROM" not in tags
+        assert "PAGE_TO" not in tags
+
+
+def test_list_block_editor_block_names_includes_page_link_definitions() -> None:
+    doc = new_document()
+    import_symbol_library(doc)
+    doc.blocks.new("CONTENTS_HEADER")
+    doc.blocks.new("CONTENTS_ROW")
+    edit = set(list_block_editor_block_names(doc))
+    for b in ("PAGE_FROM", "PAGE_TO"):
+        assert b in edit
+    for b in ("CONTENTS_HEADER", "CONTENTS_ROW", BLOCK_WIRE_BRANCH):
+        assert b not in edit
+
+
+def test_list_block_editor_block_names_excludes_inpage_definitions() -> None:
+    doc = new_document()
+    ensure_inpage_reference_blocks(doc)
+    edit = set(list_block_editor_block_names(doc))
+    assert "INPAGE_FROM" not in edit
+    assert "INPAGE_TO" not in edit
+    # Still off the drag palette when the library also brings other blocks.
+    import_symbol_library(doc)
+    palette = set(list_palette_block_names(doc))
+    assert "INPAGE_FROM" not in palette
+    assert "INPAGE_TO" not in palette
+
+
 def test_list_palette_block_names_excludes_system_blocks() -> None:
     doc = new_document()
     import_symbol_library(doc)
     doc.blocks.new("CONTENTS_HEADER")
     doc.blocks.new("CONTENTS_ROW")
     names = set(list_palette_block_names(doc))
-    for b in ("CONTENTS_HEADER", "CONTENTS_ROW", "PAGE_FROM", "PAGE_TO"):
+    for b in (
+        "CONTENTS_HEADER",
+        "CONTENTS_ROW",
+        "PAGE_FROM",
+        "PAGE_TO",
+        "INPAGE_FROM",
+        "INPAGE_TO",
+    ):
         assert b not in names
     assert BLOCK_CHECKPOINT not in names
 

@@ -1,4 +1,4 @@
-"""Layers for USER_LINE / USER_CIRCLE / USER_CLOUD sketch entities."""
+"""Layers for USER_LINE / USER_CIRCLE / USER_CLOUD / USER_ARC sketch entities."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ from ezdxf.entities import DXFEntity
 
 from logic_cad.core.model.constants import (
     LAYER_ANNOTATION,
+    LAYER_USER_ARC_CENTER,
+    LAYER_USER_ARC_CONTINUOUS,
+    LAYER_USER_ARC_DASHED,
     LAYER_USER_CIRCLE_CENTER,
     LAYER_USER_CIRCLE_CONTINUOUS,
     LAYER_USER_CIRCLE_DASHED,
@@ -32,6 +35,9 @@ USER_SKETCH_WIRE_LAYERS: frozenset[str] = frozenset(
         LAYER_USER_CLOUD_CONTINUOUS,
         LAYER_USER_CLOUD_CENTER,
         LAYER_USER_CLOUD_DASHED,
+        LAYER_USER_ARC_CONTINUOUS,
+        LAYER_USER_ARC_CENTER,
+        LAYER_USER_ARC_DASHED,
     }
 )
 
@@ -46,6 +52,9 @@ _LAYER_TO_DISPLAY_LINETYPE: dict[str, str] = {
     LAYER_USER_CLOUD_CONTINUOUS: "CONTINUOUS",
     LAYER_USER_CLOUD_CENTER: "CENTER",
     LAYER_USER_CLOUD_DASHED: "DASHED",
+    LAYER_USER_ARC_CONTINUOUS: "CONTINUOUS",
+    LAYER_USER_ARC_CENTER: "CENTER",
+    LAYER_USER_ARC_DASHED: "DASHED",
 }
 
 
@@ -134,8 +143,25 @@ def user_sketch_cloud_layer_for_linetype(linetype: str) -> str:
     return LAYER_USER_CLOUD_CONTINUOUS
 
 
+def user_sketch_arc_layer_for_linetype(linetype: str) -> str:
+    """Map sketch linetype to the USER_ARC layer (BYLAYER inherits that layer's default linetype).
+
+    Args:
+        linetype: UI or DXF linetype name.
+
+    Returns:
+        ``LAYER_USER_ARC_*`` for CONTINUOUS / CENTER / DASHED.
+    """
+    key = normalize_user_sketch_linetype(linetype)
+    if key == "DASHED":
+        return LAYER_USER_ARC_DASHED
+    if key == "CENTER":
+        return LAYER_USER_ARC_CENTER
+    return LAYER_USER_ARC_CONTINUOUS
+
+
 def user_sketch_entity_linetype_for_display(linetype: str) -> str:
-    """Return the explicit DXF linetype name to store on USER_LINE / USER_CIRCLE.
+    """Return the explicit DXF linetype name to store on USER_LINE / USER_CIRCLE / USER_ARC.
 
     Args:
         linetype: UI or DXF linetype name.
@@ -153,7 +179,7 @@ def user_sketch_display_linetype_for_entity(entity: DXFEntity) -> str:
     linetypes are returned as-is when present.
 
     Args:
-        entity: A LINE or CIRCLE with USER_LINE / USER_CIRCLE XDATA.
+        entity: A LINE, CIRCLE, ARC, or LWPOLYLINE with USER_* XDATA.
 
     Returns:
         ``CONTINUOUS``, ``DASHED``, or ``CENTER`` (or a non-ByLayer name if set).

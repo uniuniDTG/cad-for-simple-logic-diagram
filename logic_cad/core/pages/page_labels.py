@@ -34,6 +34,7 @@ def page_ref_link_label(target_layout: str, ordinal: int) -> str:
 
 def page_symbol_label(layout_name: str, pages: list[str]) -> str:
     """Short hint text (palette, etc.): ``{name} A`` for normal sheets; not the same as PAGE_REF SYM."""
+    # Local import: page_order imports this module; hoisting would create an import cycle.
     from logic_cad.core.pages.page_order import is_toc_layout_name
 
     if layout_name not in pages:

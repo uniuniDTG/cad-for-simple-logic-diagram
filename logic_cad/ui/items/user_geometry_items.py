@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
@@ -24,6 +26,7 @@ from logic_cad.ui.bulge_path import append_bulge_arc_to_path
 from logic_cad.ui.items.wire_item import WIRE_AXIS_HIT_WIDTH_MM, apply_dxf_linetype_to_pen, dxf_to_scene
 from logic_cad.ui.scene_item.hits import DEFAULT_SCENE_HIT_TOL_MM
 from logic_cad.ui.scene_item.z_order import (
+    CANVAS_Z_USER_ARC,
     CANVAS_Z_USER_CIRCLE,
     CANVAS_Z_USER_CLOUD,
     CANVAS_Z_USER_LINE,
@@ -212,6 +215,135 @@ class UserCircleItem(QGraphicsEllipseItem):
             painter.setPen(p)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(self.rect())
+
+
+_ARC_TESSELLATION_SEGMENTS: int = 64
+
+
+def _dxf_arc_ccw_span_deg(start_deg: float, end_deg: float) -> float:
+    """Return CCW angle span in degrees from DXF *start_deg* to *end_deg* (may be 360)."""
+    span = (float(end_deg) - float(start_deg)) % 360.0
+    if span <= 1e-12:
+        return 360.0
+    return span
+
+
+def _build_user_arc_path(
+    cx: float,
+    cy: float,
+    radius: float,
+    start_angle_deg: float,
+    end_angle_deg: float,
+) -> QPainterPath:
+    """Polyline-approximated arc in scene coordinates (DXF CCW)."""
+    r = float(radius)
+    sa = float(start_angle_deg)
+    span = _dxf_arc_ccw_span_deg(sa, float(end_angle_deg))
+    path = QPainterPath()
+    n = max(8, _ARC_TESSELLATION_SEGMENTS)
+    for i in range(n + 1):
+        t = i / n
+        ang = math.radians(sa + span * t)
+        xd = float(cx) + r * math.cos(ang)
+        yd = float(cy) + r * math.sin(ang)
+        pt = dxf_to_scene(xd, yd)
+        if i == 0:
+            path.moveTo(pt)
+        else:
+            path.lineTo(pt)
+    return path
+
+
+def user_arc_path_scene(
+    cx: float,
+    cy: float,
+    radius: float,
+    start_angle_deg: float,
+    end_angle_deg: float,
+) -> QPainterPath:
+    """Return a scene-space polyline path for a DXF CCW arc (for preview / items)."""
+    return _build_user_arc_path(cx, cy, radius, start_angle_deg, end_angle_deg)
+
+
+class UserArcItem(QGraphicsPathItem):
+    """USER_ARC (DXF ARC): local path from stored center/radius/angles; ``pos()`` translates."""
+
+    def __init__(
+        self,
+        sketch_uid: str,
+        cx: float,
+        cy: float,
+        radius: float,
+        start_angle_deg: float,
+        end_angle_deg: float,
+        *,
+        linetype: str = LINETYPE_CONTINUOUS,
+        stroke_color: QColor | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self.sketch_uid = sketch_uid
+        self._cx = float(cx)
+        self._cy = float(cy)
+        self._r = max(1e-303, float(radius))
+        self._sa = float(start_angle_deg)
+        self._ea = float(end_angle_deg)
+        self._linetype = linetype
+        self._moved = False
+        self.setPath(user_arc_path_scene(self._cx, self._cy, self._r, self._sa, self._ea))
+        base = QColor(200, 200, 210) if stroke_color is None else QColor(stroke_color)
+        pen = QPen(base, 0)
+        pen.setCosmetic(True)
+        apply_dxf_linetype_to_pen(pen, linetype)
+        self.setPen(pen)
+        self.setBrush(Qt.BrushStyle.NoBrush)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setZValue(CANVAS_Z_USER_ARC)
+
+    def shape(self) -> QPainterPath:
+        """Axis corridor for picking (matches wire/user-line style)."""
+        core = self.path()
+        stroker = QPainterPathStroker()
+        stroker.setWidth(WIRE_AXIS_HIT_WIDTH_MM)
+        stroker.setCapStyle(Qt.PenCapStyle.RoundCap)
+        stroker.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        return stroker.createStroke(core)
+
+    def boundingRect(self) -> QRectF:
+        s = self.shape()
+        if s.isEmpty():
+            return super().boundingRect()
+        return s.boundingRect()
+
+    def arc_geometry_dxf(self) -> tuple[tuple[float, float], float, float, float]:
+        """Return center, radius, and angles with scene translation applied (DXF mm, degrees)."""
+        ox, oy = dxf_from_scene_pos(self.pos())
+        return (self._cx + ox, self._cy + oy), self._r, self._sa, self._ea
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            if isinstance(value, QPointF):
+                xd, yd = dxf_from_scene_pos(value)
+                pitch = snap_pitch_for_qgraphics_item(self)
+                sx, sy = snap_to_grid(xd, yd, pitch)
+                value = scene_pos_from_dxf(sx, sy)
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            self._moved = True
+        return super().itemChange(change, value)
+
+    def paint(self, painter, option: QStyleOptionGraphicsItem, widget: QWidget | None = None) -> None:
+        super().paint(painter, option, widget)
+        if option.state & QStyle.StateFlag.State_Selected:
+            p = QPen(QColor(90, 170, 255), 0)
+            p.setCosmetic(True)
+            base = self.pen()
+            p.setStyle(base.style())
+            p.setDashPattern(base.dashPattern())
+            painter.setPen(p)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawPath(self.path())
 
 
 class UserCloudItem(QGraphicsPathItem):

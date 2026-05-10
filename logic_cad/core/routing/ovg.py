@@ -6,13 +6,19 @@ import math
 from collections import defaultdict
 from heapq import heappop, heappush
 
+from logic_cad.core.debug.debug_log import logic_cad_debug_routing_verbose, logic_cad_log
+from logic_cad.core.geometry.manhattan_metrics import (
+    manhattan_distance,
+    points_close_xy,
+    segment_is_horizontal,
+    segment_is_axis_aligned,
+)
 from logic_cad.core.model.constants import (
     GRID_PITCH,
     ROUTING_SOFT_OBSTACLE_PENALTY,
     ROUTING_STEP_COST,
     ROUTING_TURN_COST,
 )
-from logic_cad.core.debug.debug_log import logic_cad_debug_routing_verbose, logic_cad_log
 from ._format import fmt_pt
 from .obstacles import (
     obstacle_rects_inflated,
@@ -71,7 +77,7 @@ def _build_ovg_nodes(
     if dense_corridor:
         # Dense grid between endpoints so visibility graph stays connected in open areas
         # (corner-only nodes can leave disjoint components).
-        pad = max(30.0, (abs(dst[0] - src[0]) + abs(dst[1] - src[1])) * 0.35 + 20.0)
+        pad = max(30.0, manhattan_distance(src, dst) * 0.35 + 20.0)
         x_lo = min(src[0], dst[0]) - pad
         x_hi = max(src[0], dst[0]) + pad
         y_lo = min(src[1], dst[1]) - pad
@@ -118,7 +124,7 @@ def _build_ovg_edges(
         a, b = nodes[i], nodes[j]
         if segment_blocks_hard_and_collinear(a, b, hard_rects, existing_wire_segments):
             return
-        dist = abs(b[0] - a[0]) + abs(b[1] - a[1])
+        dist = manhattan_distance(a, b)
         adj.setdefault(i, []).append((j, dist))
         adj.setdefault(j, []).append((i, dist))
 
@@ -224,12 +230,12 @@ def _ovg_search(
     def segment_dir(i: int, j: int) -> int:
         xi, yi = nodes[i]
         xj, yj = nodes[j]
-        return 0 if abs(yj - yi) < 1e-9 else 1
+        return 0 if segment_is_horizontal((xi, yi), (xj, yj)) else 1
 
     def heuristic(idx: int) -> float:
         x, y = nodes[idx]
         xd, yd = nodes[dst_idx]
-        return (abs(xd - x) + abs(yd - y)) / pitch_safe * ROUTING_STEP_COST
+        return manhattan_distance((x, y), (xd, yd)) / pitch_safe * ROUTING_STEP_COST
 
     INF = float("inf")
     best_cost: dict[tuple[int, int | None], float] = {}
@@ -304,10 +310,7 @@ def _ovg_search(
     rev.reverse()
     result = dedupe_colinear(rev)
     if anchor_p0 is not None and result:
-        if (
-            abs(result[0][0] - anchor_p0[0]) > 1e-9
-            or abs(result[0][1] - anchor_p0[1]) > 1e-9
-        ):
+        if not points_close_xy(result[0], anchor_p0):
             result = dedupe_colinear([anchor_p0] + result)
     if logic_cad_debug_routing_verbose():
         logic_cad_log(
@@ -362,9 +365,9 @@ def route_ovg_multi_start(
     for fh in hops_snapped:
         dx = fh[0] - src0[0]
         dy = fh[1] - src0[1]
-        if abs(dx) > 1e-9 and abs(dy) > 1e-9:
+        if not segment_is_axis_aligned(src0, fh):
             continue
-        leg_len = abs(dx) + abs(dy)
+        leg_len = manhattan_distance(src0, fh)
         if leg_len + 1e-9 < min_first_leg_mm:
             continue
         cd = cardinal_from_delta(dx, dy)
@@ -382,7 +385,7 @@ def route_ovg_multi_start(
             skip_first_leg_hard_obstacle_check=skip_first_leg_hard_obstacle_check,
         ):
             continue
-        prev_d = 0 if abs(dy) < 1e-9 else 1
+        prev_d = 0 if segment_is_horizontal(src0, fh) else 1
         g0 = (leg_len / pitch_safe) * ROUTING_STEP_COST
         raw_starts.append((fh, prev_d, g0))
 
