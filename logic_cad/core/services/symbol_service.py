@@ -12,7 +12,10 @@ from ezdxf.math import Vec3
 
 from logic_cad.core.attrib_tags import is_supported_attdef_tag
 from logic_cad.core.debug.debug_log import logic_cad_log
-from logic_cad.core.dxf.attrib_geometry_sync import dxfattribs_for_attrib_from_attdef
+from logic_cad.core.dxf.attrib_geometry_sync import (
+    dxfattribs_for_attrib_from_attdef,
+    sync_insert_attrib_geometry_from_attdefs,
+)
 from logic_cad.core.model.constants import (
     BLOCK_CHECKPOINT,
     BLOCK_INPAGE_FROM,
@@ -174,6 +177,75 @@ class SymbolService:
         ins.add_attrib(str(attdef.dxf.tag), value, (float(loc.x), float(loc.y)), dxfattribs=dxfattribs)
         return True
 
+    def _sync_insert_attrib_geometry_after_attribs(self, ins: Insert) -> None:
+        """Copy ATTDEF text geometry onto child ATTRIB entities for CAD/PDF-compatible placement.
+
+        ezdxf ``add_auto_attribs`` often omits alignment fields present on ATTDEF such as
+        ``align_point``; syncing immediately after attaching attributes keeps INSERT children
+        consistent with block definitions without a save-scan.
+
+        Args:
+            ins: Paper-space block reference whose ``attribs`` may have been populated.
+        """
+
+        sync_insert_attrib_geometry_from_attdefs(self.doc, ins)
+
+    def _place_symbol_attrib_defaults_map(self, block_name: str, sym_ref: str) -> dict[str, str]:
+        """Collect ATTDEF defaults for *block_name* excluding port geometry ATTDEF layers.
+
+        Port markers use ``LD_PORT_*`` ATTDEF placeholders; INSERT children skip those so
+        block references stay free of unintended attribute clones (same rule as paint skips).
+
+        Args:
+            block_name: Referenced ``INSERT`` block definition name on *self.doc*.
+            sym_ref: Symbol reference text written for the SYM tag when a SYM ATTDEF exists.
+
+        Returns:
+            Canonical ATTDEF tag string to instance text. Duplicate tags differing only by
+            case use the first ATTDEF encountered.
+        """
+
+        blk = self.doc.blocks.get(block_name)
+        if blk is None:
+            return {}
+        out: dict[str, str] = {}
+        seen_u: set[str] = set()
+        for ent in blk:
+            if str(ent.dxftype()) != "ATTDEF":
+                continue
+            layer_s = str(getattr(ent.dxf, "layer", "") or "")
+            if layer_s.startswith("LD_PORT_"):
+                continue
+            tag_raw = str(ent.dxf.tag)
+            tag_u = tag_raw.upper()
+            if tag_u in seen_u:
+                continue
+            seen_u.add(tag_u)
+            if tag_u == "SYM":
+                out[tag_raw] = str(sym_ref)
+            else:
+                out[tag_raw] = str(getattr(ent.dxf, "text", "") or "")
+        return out
+
+    def _apply_auto_attribs_from_text_map(self, ins: Insert, mapping: dict[str, str]) -> None:
+        """Attach child ATTRIBs from *mapping* via ``add_auto_attribs``, with resilient fallback.
+
+        Args:
+            ins: Paper-space block reference being populated.
+            mapping: Tag to default / instance text strings.
+        """
+
+        if not mapping:
+            return
+        try:
+            ins.add_auto_attribs(mapping)
+        except Exception:
+            for canonical, text in mapping.items():
+                try:
+                    ins.add_auto_attribs({canonical: text})
+                except Exception:
+                    self._add_insert_attrib(ins, canonical, text)
+
     def place_symbol(self, layout_name: str, block_name: str, pos: tuple[float, float], ref: str, entity_type: str) -> str:
         if block_name not in self.doc.blocks:
             raise ValueError(f"未定義のブロックです: {block_name!r}")
@@ -191,15 +263,15 @@ class SymbolService:
         uid = new_uid()
         tags = build_ld_app_tags("1", uid, entity_type)
         set_entity_xdata(ins, tags)
-        if self._block_has_attdef(block_name, "SYM"):
-            try:
-                ins.add_auto_attribs({"SYM": ref})
-            except ezdxf.DXFValueError:
-                self._add_insert_attrib(ins, "SYM", ref)
-            try:
-                self.set_attrib_visible(layout_name, uid, "SYM", False)
-            except ValueError:
-                pass
+        att_map = self._place_symbol_attrib_defaults_map(block_name, ref)
+        if att_map:
+            self._apply_auto_attribs_from_text_map(ins, att_map)
+            if self._block_has_attdef(block_name, "SYM"):
+                try:
+                    self.set_attrib_visible(layout_name, uid, "SYM", False)
+                except ValueError:
+                    pass
+            self._sync_insert_attrib_geometry_after_attribs(ins)
         return uid
 
     def place_and_gate(self, layout_name: str, n_inputs: int, pos: tuple[float, float], ref: str | None = None) -> str:
@@ -277,6 +349,7 @@ class SymbolService:
                 self.set_attrib_visible(layout_name, uid, "SYM", True)
             except ValueError:
                 pass
+            self._sync_insert_attrib_geometry_after_attribs(ins)
         if not defer_refresh:
             refresh_page_ref_syms_on_layout(self.doc, layout_name)
         return uid
@@ -350,6 +423,7 @@ class SymbolService:
                 ins.add_auto_attribs({"SYM": sym})
             except ezdxf.DXFValueError:
                 self._add_insert_attrib(ins, "SYM", sym)
+            self._sync_insert_attrib_geometry_after_attribs(ins)
             for a in ins.attribs:
                 if str(a.dxf.tag).upper() == "SYM":
                     a.dxf.height = h0
@@ -594,6 +668,7 @@ class SymbolService:
         if block_name not in self.doc.blocks:
             raise ValueError(f"属性タグ {tag!r} がありません。")
         if self._add_insert_attrib(ins, tag, value):
+            self._sync_insert_attrib_geometry_after_attribs(ins)
             return
         if self._is_optional_symbol_tag(tag):
             if not self._block_has_attdef(block_name, tag):
@@ -689,6 +764,7 @@ class SymbolService:
                 if str(a.dxf.tag).upper() == str(tag).upper():
                     a.dxf.invisible = inv
                     break
+        self._sync_insert_attrib_geometry_after_attribs(new_ins)
         if is_inpage:
             refresh_inpage_ref_syms_on_layout(self.doc, layout_name)
         elif t == "PAGE_REF":
@@ -863,6 +939,7 @@ class SymbolService:
             inv = vis_by_u.get(str(a.dxf.tag).upper())
             if inv is not None:
                 a.dxf.invisible = inv
+        self._sync_insert_attrib_geometry_after_attribs(new_ins)
         self.sync_gate_stub_arrows_dxf(layout_name, uid_str)
 
     def set_gate_show_input_stub_in_arrow(self, layout_name: str, uid: str, show: bool) -> None:
@@ -990,6 +1067,7 @@ class SymbolService:
                 if str(a.dxf.tag).upper() == str(tag).upper():
                     a.dxf.invisible = inv
                     break
+        self._sync_insert_attrib_geometry_after_attribs(ins)
         if get_type(ins) == "PAGE_REF":
             refresh_page_ref_syms_on_layout(self.doc, layout_name)
             return nu

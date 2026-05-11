@@ -51,7 +51,6 @@ from logic_cad.core.model.constants import (
     LAYER_VPORT,
     LAYER_WIRE_COM,
     LINETYPE_CONTINUOUS,
-    LINETYPE_LOGIC,
     PEER_UID_XDATA,
     TARGET_LAYOUT_XDATA,
     USER_CLOUD_BULGE,
@@ -80,7 +79,7 @@ from logic_cad.ui.dialogs.user_text_place_dialog import prompt_dxf_text_string_a
 from logic_cad.ui.bulge_path import append_bulge_arc_to_path
 from logic_cad.ui.scene_item.z_order import CANVAS_Z_FRAME_VPORT_PREVIEW
 from logic_cad.ui.scene_item.osnap import OsnapCandidate, pick_osnap_candidate
-from logic_cad.ui.dxf_display_color import entity_stroke_qcolor
+from logic_cad.ui.dxf_display_color import entity_effective_linetype, entity_stroke_qcolor
 from logic_cad.ui.items.mtext_item import DxfMTextItem
 from logic_cad.ui.items.symbol_item import SymbolItem
 from logic_cad.ui.items.user_geometry_items import (
@@ -1044,10 +1043,7 @@ class DiagramScene(QGraphicsScene):
                 ]
                 log_ok, geo_ok = self._diagram.wire_connection_health(uid)
                 broken = not (log_ok and geo_ok)
-                lt_raw = getattr(e.dxf, "linetype", None)
-                lt = str(lt_raw).strip() if lt_raw else ""
-                if not lt:
-                    lt = LINETYPE_LOGIC
+                lt = entity_effective_linetype(self._diagram.doc, e)
                 st = entity_stroke_qcolor(self._diagram.doc, e)
                 if str(e.dxf.layer).strip().upper() == LAYER_WIRE_COM.upper():
                     st.setAlpha(0)
@@ -1058,10 +1054,7 @@ class DiagramScene(QGraphicsScene):
                 if len(row_list) < 2:
                     continue
                 pts_xy = [(float(r[0]), float(r[1])) for r in row_list]
-                lt_raw = getattr(e.dxf, "linetype", None)
-                lt_a = str(lt_raw).strip() if lt_raw else ""
-                if not lt_a:
-                    lt_a = LINETYPE_LOGIC
+                lt_a = entity_effective_linetype(self._diagram.doc, e)
                 st_a = entity_stroke_qcolor(self._diagram.doc, e)
                 # COM base wire centerline is hidden, but arrowheads must remain visible.
                 self.addItem(WireArrowItem(pts_xy, linetype=lt_a, stroke_color=st_a))

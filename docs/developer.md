@@ -394,10 +394,12 @@ python -m logic_cad.app.main --debug
 
 Qt はブロック内 **ATTDEF**＋`normalize_dxf_text_entity()` でラベル位置を決めるが、ezdxf の matplotlib 経路は **ATTRIB** 実体の DXF 整列情報のまま描画する。食い違うと PDF だけズレうる。
 
-- 共通: `logic_cad/core/dxf/attrib_geometry_sync.py`（`apply_attdef_text_geometry_to_attrib` / `sync_paper_layout_insert_attrib_geometry_from_attdefs` は **任意** の修復用。ATTDEF に `align_point` が無いときは ATTRIB 側の `align_point` を触らない）
+- 共通: `logic_cad/core/dxf/attrib_geometry_sync.py`（`apply_attdef_text_geometry_to_attrib` / `sync_paper_layout_insert_attrib_geometry_from_attdefs` は **任意** の修復用。ATTDEF に `align_point` が無いときは ATTRIB 側の `align_point` を触らない ― *例外として* `readfile` の WCS→局所復帰で、ATTDEF に無い `align_point` が子に残っているときは `discard` する）
 - **新規** ATTRIB: `dxfattribs_for_attrib_from_attdef()` を `SymbolService._add_insert_attrib` と `page_ref._upsert_insert_attrib_from_attdef` で利用（`add_auto_attribs` 失敗時など）
+- **記号配置直後（2026-05）**: `SymbolService.place_symbol` は **`LD_PORT_*` 以外のすべての ATTDEF** について子 ATTRIB を作成し（既定文字は ATTDEF）、続けて `sync_insert_attrib_geometry_from_attdefs` を1回呼ぶ。SYM のみを付けていた旧挙動では **SYM のないブロック（例: DISC_FIELD の LABEL だけ）** が原点付き欠落になりうる。
 - **既存** ATTRIB（PAGE_REF の refresh 経由）: `_upsert_insert_attrib_from_attdef` は **`text` / `invisible` のみ**更新し、幾何を ATTDEF に毎回追従させない（定義側の退化座標で refresh が悪化し続けるのを避ける）。定義を直したあと位置を合わせるには `sync_insert_attrib_geometry_from_attdefs` か、ブロック適用後の `ensure_cross_page_reference_blocks` 内の退化 ATTDEF 修復＋同期に任せる
 - **PDF エクスポート（子 ATTRIB の WCS）**: ezdxf の matplotlib フロントは `virtual_entities()` のあと `insert.attribs` を **INSERT 行列なし**で描く。そのため子 ATTRIB の `insert`／`align_point` は **紙レイアウト WCS** である必要がある。`export_paper_layouts_to_pdf` は各ページの `draw_layout` 直前に `paper_layout_attrib_wcs_bake_for_pdf_session`（内部で snapshot → bake → 描画後 restore）を使い、**ブロック局所のまま**と判定できたときだけ ATTDEF 幾何を `Insert.matrix44()` で焼き、ライブ DXF は復元する。既に期待 WCS に近い座標（CAD 側で焼かれたケース）は距離閾値でスキップし二重変換を避ける（`PDF_ATTRIB_POSITION_EQ_TOL_MM`）。
+- **DXF ファイル保存／読込（外部 CAD と同じレイアウト座標）**: `logic_cad/core/dxf/dxf_repository.saveas` は `doc.saveas` の直前に PDF と同種の bake を行いファイルへ **子 ATTRIB をレイアウト WCS** で書くが、続けてスナップショット復元により **インメモリはブロック局所のまま**。`readfile` は読込後に `revert_all_paper_layout_attrib_inserts_from_wcs_after_load` を掛け、再び ATTDEF と揃えた **局所**へ戻す（旧ファイルの局所要素はヒューリスティクで変更しない）。
 
 ### ユーザー向け: PAGE_REF の PAGE_NAME / PAGE_DESC が枠外／原点付近になるとき
 
@@ -406,7 +408,7 @@ Qt はブロック内 **ATTDEF**＋`normalize_dxf_text_entity()` でラベル位
 - **自動修復**: `ensure_cross_page_reference_blocks` 実行時、`PAGE_NAME` / `PAGE_DESC` の ATTDEF 挿入点が原点付近に退化している場合は、ビルトインと同じ座標・字高・水平整列へ書き換え、既存の PAGE_REF INSERT に対して **一度** `sync_insert_attrib_geometry_from_attdefs` 相当の同期を行う。
 - **任意の一括幾何同期**: 全レイアウトへの `sync_paper_layout_insert_attrib_geometry_from_attdefs` 等の一括同期は行わない（整合済みの ATTRIB を壊しうるため）。必要ならスクリプトや手動で呼ぶ（上記の **PDF 用 bake／restore** はエクスポート専用で、永続データを変えない）。
 
-関連テスト: `logic_cad/tests/test_attrib_geometry_sync.py`
+関連テスト: `logic_cad/tests/test_attrib_geometry_sync.py` / `logic_cad/tests/test_symbol_place_attrib_geometry.py`
 
 ---
 
@@ -415,6 +417,7 @@ Qt はブロック内 **ATTDEF**＋`normalize_dxf_text_entity()` でラベル位
 - **症状**: 稀に matplotlib 経路で ``TypeError: object of type 'NoneType' has no len``。ezdxf の `draw_hatch_pattern` が ``pattern is not None`` かつ ``pattern.lines is None`` を想定していないため。
 - **対策**: `logic_cad/core/services/pdf_export_service.py` の `_PdfExportFrontend.draw_hatch_pattern` で `lines` を検証してから `super()` に委譲。
 - **観察**: シンボル削除→Undo 後に PDF が通ることがある。Undo の `restore_entity_from_payload` でエンティティが作り直され、ezdxf 上の HATCH 内部状態が整合する場合がある（論理内容は同じでもオブジェクト状態が変わりうる）。
+- **TODO**: INSERT の復元経路では `add_auto_attribs` のみで ATTRIB が作られ **`align_point` が欠ける**ことがあるため、復元直後に当該 `INSERT` へ `sync_insert_attrib_geometry_from_attdefs` を掛ける案を検討（別タスク）。
 - **調査用**: `uv run python scripts/list_pattern_hatches.py drawing.dxf`（ブロック定義内の HATCH も列挙。`risky_lines_none=True` が疑わしい）。
 
 関連テスト: `logic_cad/tests/test_pdf_export.py`（`test_pdf_frontend_draw_hatch_pattern_skips_when_pattern_lines_is_none`）

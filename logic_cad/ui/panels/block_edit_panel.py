@@ -286,6 +286,18 @@ class BlockEditPanel(QWidget):
         if self._scene is not None:
             self._scene.set_placement_tool(None)
 
+    def handle_escape_key(self) -> None:
+        """Handle Escape like the main diagram: cancel preview first, then drop the tool.
+
+        When line/circle/arc placement has an in-progress preview, only that preview is cleared
+        and toolbar toggles stay on. A second Escape clears placement tools.
+        """
+        sc = self._scene
+        if sc is not None and sc.placement_preview_in_progress():
+            sc.cancel_placement_preview_keep_tool()
+            return
+        self.clear_placement_tools()
+
     def _clear_placement_tools(self) -> None:
         self.clear_placement_tools()
 

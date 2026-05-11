@@ -17,6 +17,8 @@ def _add_optional_alarm_block(diagram: LogicDiagram, block_name: str) -> None:
 
 
 def test_place_symbol_without_sym_attdef_still_works():
+    """Placement materializes every non-port ATTDEF (no SYM on this block definition)."""
+
     d = LogicDiagram.new()
     _add_optional_alarm_block(d, "ALARM_OPTIONAL")
 
@@ -26,7 +28,7 @@ def test_place_symbol_without_sym_attdef_still_works():
     ins = d.symbols.insert_by_uid(d.current_layout_name, uid)
     assert ins is not None
     assert ins.dxf.name == "ALARM_OPTIONAL"
-    assert {str(a.dxf.tag) for a in ins.attribs} == set()
+    assert {str(a.dxf.tag) for a in ins.attribs} == {"STATIC_LABEL0", "LABEL0", "LABEL2"}
 
 
 def test_optional_symbol_tags_can_be_missing_without_failing_updates():

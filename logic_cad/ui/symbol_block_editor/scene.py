@@ -774,6 +774,36 @@ class SymbolBlockEditScene(QGraphicsScene):
             self.removeItem(mr)
         self._sketch_preview_arc_markers.clear()
 
+    def placement_preview_in_progress(self) -> bool:
+        """Return True while line/circle/arc placement has started but not committed.
+
+        Used for Escape handling: first Esc clears this preview only; second Esc clears the tool.
+
+        Returns:
+            True when a placement rubber-band or arc chord step is active.
+        """
+
+        if self._placement == "line" and self._line_p0_dxf is not None:
+            return True
+        if self._placement == "circle" and self._circle_c_dxf is not None:
+            return True
+        if self._placement == "arc" and len(self._sketch_arc_dxf_pts) > 0:
+            return True
+        return False
+
+    def cancel_placement_preview_keep_tool(self) -> None:
+        """Discard line/circle/arc placement previews without changing the active tool.
+
+        Clears draft geometry only (same outcome as right-click cancel on those tools).
+
+        Returns:
+            None
+        """
+
+        self._reset_line_draft()
+        self._reset_circle_draft()
+        self._reset_arc_draft()
+
     def _ensure_port_hover(self, scene_pos: QPointF) -> None:
         if self._placement != "port":
             return

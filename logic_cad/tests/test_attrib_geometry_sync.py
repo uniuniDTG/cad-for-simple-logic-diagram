@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import tempfile
 
+from typing import Any
+
 import ezdxf
 import pytest
 
@@ -19,7 +21,106 @@ from logic_cad.core.dxf.attrib_geometry_sync import (
     snapshot_paper_layout_insert_attrib_geometry,
     sync_paper_layout_insert_attrib_geometry_from_attdefs,
 )
+from logic_cad.core.dxf.dxf_repository import new_document, readfile as repository_readfile, saveas as repository_saveas
 from logic_cad.core.services.pdf_export_service import export_paper_layouts_to_pdf
+
+
+def _paper_layout_attrib_label0(doc: ezdxf.Drawing) -> tuple[Any, Any]:
+    """Return ``(INSERT, ATTRIB)`` for the first paper-layout ``LABEL0`` child attribute."""
+
+    layout = doc.layouts.get("Layout1")
+    lay_blk = doc.blocks.get(layout.block_record_name)
+    for ent in lay_blk:
+        if str(ent.dxftype()) != "INSERT":
+            continue
+        ins = ent
+        for a in ins.attribs:
+            if str(a.dxf.tag).upper() == "LABEL0":
+                return ins, a
+    pytest.fail("expected LABEL0 attribute on Layout1")
+
+
+def test_repository_save_writes_disk_wcs_and_restores_runtime_block_local() -> None:
+    """saveas must bake attrib inserts on disk yet leave the live doc block-local."""
+
+    doc = new_document()
+    blk = doc.blocks.new("RT_SYM_SAVE")
+    ad = blk.add_attdef(
+        "LABEL0",
+        (0.0, 0.7),
+        "d",
+        dxfattribs={"height": 1.6, "halign": 1},
+    )
+    ad.dxf.align_point = (0.0, 0.7, 0.0)
+
+    lay = doc.layouts.get("Layout1")
+    lay_blk = doc.blocks.get(lay.block_record_name)
+    ins = lay_blk.add_blockref("RT_SYM_SAVE", (37.0, 113.0))
+    attrib = ins.add_attrib(
+        "LABEL0",
+        "aaa",
+        (0.0, 0.7, 0.0),
+        dxfattribs={"height": 1.6, "halign": 1},
+    )
+    apply_attdef_text_geometry_to_attrib(ad, attrib)
+
+    fd, path = tempfile.mkstemp(suffix=".dxf")
+    os.close(fd)
+    try:
+        repository_saveas(doc, path)
+        assert float(attrib.dxf.insert.x) == pytest.approx(0.0)
+        assert float(attrib.dxf.insert.y) == pytest.approx(0.7)
+
+        doc_disk = ezdxf.readfile(path)
+        _, a_disk = _paper_layout_attrib_label0(doc_disk)
+        expected_wcs = ins.matrix44().transform(Vec3(0.0, 0.7, 0.0))
+        assert float(a_disk.dxf.insert.x) == pytest.approx(float(expected_wcs.x))
+        assert float(a_disk.dxf.insert.y) == pytest.approx(float(expected_wcs.y))
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def test_repository_readfile_reverts_saved_wcs_attrib_to_block_local() -> None:
+    """Round-trip reload must restore LABEL0 insert to ATTDEF-local coordinates."""
+
+    doc = new_document()
+    blk = doc.blocks.new("RT_SYM_ROUND")
+    ad = blk.add_attdef(
+        "LABEL0",
+        (0.0, -2.3),
+        "x",
+        dxfattribs={"height": 1.6, "halign": 1},
+    )
+    ad.dxf.align_point = (0.0, -2.3, 0.0)
+
+    lay = doc.layouts.get("Layout1")
+    lay_blk = doc.blocks.get(lay.block_record_name)
+    ins = lay_blk.add_blockref("RT_SYM_ROUND", (12.5, 99.75))
+    attrib = ins.add_attrib(
+        "LABEL0",
+        "eee",
+        (0.0, -2.3, 0.0),
+        dxfattribs={"height": 1.6, "halign": 1},
+    )
+    apply_attdef_text_geometry_to_attrib(ad, attrib)
+
+    fd, path = tempfile.mkstemp(suffix=".dxf")
+    os.close(fd)
+    try:
+        repository_saveas(doc, path)
+        doc_reload = repository_readfile(path)
+        _, a_reload = _paper_layout_attrib_label0(doc_reload)
+        assert str(a_reload.dxf.text) == "eee"
+        assert float(a_reload.dxf.insert.x) == pytest.approx(0.0)
+        assert float(a_reload.dxf.insert.y) == pytest.approx(-2.3)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def test_dxfattribs_for_attrib_from_attdef_includes_alignment() -> None:

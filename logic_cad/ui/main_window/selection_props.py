@@ -20,7 +20,6 @@ from logic_cad.core.model.constants import (
     PAGE_REF_SHOW_PAGE_DESC_XDATA,
     PAGE_REF_SHOW_PAGE_NAME_XDATA,
     PAGE_REF_SHOW_TARGET_INFO_XDATA,
-    LAYER_WIRE_COM,
     LINETYPE_COM,
     LINETYPE_LOGIC,
     PEER_UID_XDATA,
@@ -28,7 +27,7 @@ from logic_cad.core.model.constants import (
 )
 from logic_cad.core.model.xdata import get_type, read_ld_app_dict
 from logic_cad.core.undo.history import find_entity_by_uid
-from logic_cad.ui.main_window.edit_actions import _block_edit_tab_active
+from logic_cad.ui.dxf_display_color import entity_effective_linetype
 from logic_cad.ui.items.symbol_item import SymbolItem
 from logic_cad.ui.items.user_geometry_items import (
     UserArcItem,
@@ -38,6 +37,7 @@ from logic_cad.ui.items.user_geometry_items import (
     UserTextItem,
 )
 from logic_cad.ui.items.wire_item import WireItem
+from logic_cad.ui.main_window.edit_actions import _block_edit_tab_active
 
 if TYPE_CHECKING:
     from logic_cad.ui.main_window.window import MainWindow
@@ -72,12 +72,8 @@ def on_selection_changed(win: MainWindow) -> None:
             xd = read_ld_app_dict(e)
             if str(xd.get("unit") or "").strip().upper() == "COM":
                 lt = LINETYPE_COM
-            elif hasattr(e.dxf, "linetype"):
-                raw = e.dxf.linetype
-                if raw is not None and str(raw).strip():
-                    lt = str(raw).strip()
-                elif str(getattr(e.dxf, "layer", "")).strip().upper() == LAYER_WIRE_COM.upper():
-                    lt = LINETYPE_COM
+            else:
+                lt = entity_effective_linetype(win._diagram.doc, e)
         win._props.show_wire(it.wire_uid, lt)
         return
     if isinstance(it, UserLineItem):

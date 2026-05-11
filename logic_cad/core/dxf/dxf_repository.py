@@ -48,6 +48,13 @@ from logic_cad.core.model.constants import (
 )
 from logic_cad.core.model.document_meta import apply_document_meta_stamp, ensure_regapp_document_meta
 from logic_cad.core.model.xdata import ensure_regapp
+from logic_cad.core.dxf.attrib_geometry_sync import (
+    AttribGeomSnapshot,
+    persist_all_paper_layout_attrib_inserts_as_wcs_for_save,
+    restore_paper_layout_insert_attrib_geometry,
+    revert_all_paper_layout_attrib_inserts_from_wcs_after_load,
+    snapshot_paper_layout_insert_attrib_geometry,
+)
 from logic_cad.core.pages.page_order import apply_paper_layout_taborder_by_name
 from logic_cad.core.paper_layout_configure import configure_paper_layout_a4_landscape
 from logic_cad.core.paper_layout_strip import strip_ld_contents_area_all_paper_layouts
@@ -200,6 +207,18 @@ def ensure_standard_layers(doc: Drawing) -> None:
 
 
 def readfile(path: str | Path) -> Drawing:
+    """Load DXF with app post-load normalization (layouts, attrib geometry, strip).
+
+    INSERT child attributes stored in layout/WCS convention (saved by Logic CAD's
+    ``saveas`` or by host CAD) are converted back to block-local ATTDEF geometry when
+    the heuristic matches (:func:`~logic_cad.core.dxf.attrib_geometry_sync.revert_all_paper_layout_attrib_inserts_from_wcs_after_load`).
+
+    Args:
+        path: Filesystem path to DXF.
+
+    Returns:
+        Drawing configured for Logic CAD editors.
+    """
     doc = load_dxf_with_recover(path, errors="ignore")
     ensure_drawing_units_mm(doc)
     ensure_standard_layers(doc)
@@ -210,13 +229,19 @@ def readfile(path: str | Path) -> Drawing:
         if not layout.is_modelspace:
             configure_paper_layout_a4_landscape(doc, layout.name)
     strip_ld_contents_area_all_paper_layouts(doc)
+    revert_all_paper_layout_attrib_inserts_from_wcs_after_load(doc)
     return doc
 
 
 def saveas(doc: Drawing, path: str | Path) -> None:
-    """Persist the document unchanged. Dynamic gates stay box/C-shape blocks; no IEC substitution.
+    """Persist drawing to *path* after standard pre-write hooks.
 
-    Before writing: set layout ``taborder`` to match paper layout name order (TOC first, then natural sort).
+    INSERT child ``ATTRIB`` insert/align geometry is temporarily rewritten to paper-space
+    WCS for interoperability with host CAD, then restored so the in-memory document keeps
+    block-local coordinates matching ATTDEF definitions.
+
+    Dynamic gates stay box/C-shape blocks; no IEC substitution. Before writing: set layout
+    ``taborder`` to match paper layout name order (TOC first, then natural sort).
     """
     apply_paper_layout_taborder_by_name(doc)
     strip_ld_contents_area_all_paper_layouts(doc)
@@ -229,7 +254,20 @@ def saveas(doc: Drawing, path: str | Path) -> None:
     if LAYER_VPORT in doc.layers:
         doc.layers.get(LAYER_VPORT).off()
     apply_document_meta_stamp(doc)
-    doc.saveas(str(path))
+
+    layout_snaps: list[tuple[str, list[AttribGeomSnapshot]]] = []
+    for layout in doc.layouts:
+        if layout.is_modelspace:
+            continue
+        layout_snaps.append(
+            (layout.name, snapshot_paper_layout_insert_attrib_geometry(doc, layout.name))
+        )
+    try:
+        persist_all_paper_layout_attrib_inserts_as_wcs_for_save(doc)
+        doc.saveas(str(path))
+    finally:
+        for _layout_name, snap in layout_snaps:
+            restore_paper_layout_insert_attrib_geometry(doc, snap)
 
 
 class DxfRepository:
@@ -239,5 +277,5 @@ class DxfRepository:
         self.doc = doc
 
     def save(self, path: str | Path) -> None:
-        """Same as saveas: file matches in-memory doc; no gate symbol substitution."""
+        """Persist like :func:`saveas` (disk child ``ATTRIB`` uses layout WCS baked for CAD)."""
         saveas(self.doc, path)

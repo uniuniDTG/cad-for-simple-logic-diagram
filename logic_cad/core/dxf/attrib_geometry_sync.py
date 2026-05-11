@@ -6,10 +6,15 @@ while ezdxf's PDF pipeline renders each ATTRIB entity as stored. When ATTRIB lac
 
 ``ezdxf.addons.drawing`` renders ``insert.attribs`` in a second pass **without** applying
 the block reference transform, so child ATTRIB ``insert`` values must already be in
-**paper / layout WCS**. App-created ATTRIBs often still hold block-local coordinates
-(matching ATTDEF); :func:`bake_paper_layout_attrib_inserts_to_wcs_for_pdf` rewrites only
-those cases before matplotlib export. Prefer :func:`paper_layout_attrib_wcs_bake_for_pdf_session`
-in callers so the live document is restored via :func:`restore_paper_layout_insert_attrib_geometry`.
+**paper / layout WCS** for matplotlib/PDF. App-created ATTRIBs often hold block-local
+coordinates (matching ATTDEF); :func:`bake_paper_layout_attrib_inserts_to_wcs_for_pdf`
+rewrites block-local inserts before matplotlib export inside
+:func:`paper_layout_attrib_wcs_bake_for_pdf_session`, which restores the live document.
+
+Saving through :func:`~logic_cad.core.dxf.dxf_repository.saveas` temporarily applies the same
+**bake** so external CAD stacks attributes in layout coordinates, then restores the in-memory
+block-local parity. :func:`~logic_cad.core.dxf.dxf_repository.readfile` runs
+:func:`revert_all_paper_layout_attrib_inserts_from_wcs_after_load` so editors keep block-local.
 """
 
 from __future__ import annotations
@@ -247,6 +252,105 @@ def bake_paper_layout_attrib_inserts_to_wcs_for_pdf(doc: Drawing, layout_name: s
                 attrib.dxf.align_point = (float(exp_ap.x), float(exp_ap.y), float(exp_ap.z))
             n += 1
     return n
+
+
+def persist_all_paper_layout_attrib_inserts_as_wcs_for_save(doc: Drawing) -> int:
+    """Bake every paper layout INSERT's child attributes to layout WCS before writing DXF.
+
+    External CAD stacks block references with child ``ATTRIB`` insertion points in layout
+    (paper-space) coordinates, while this app normally keeps geometry block-local matching
+    ATTDEF definitions. Persisting baked coordinates avoids labels appearing clustered near
+    the layout origin after round-trips through AutoCAD, BricsCAD, nanoCAD, etc.
+
+    Uses the same heuristics as :func:`bake_paper_layout_attrib_inserts_to_wcs_for_pdf` — no
+    snapshot/restore unlike PDF export.
+
+    Args:
+        doc: Drawing about to be written with :meth:`~ezdxf.document.Drawing.saveas`.
+
+    Returns:
+        Total number of ``ATTRIB`` entities rewritten across all paper layouts.
+    """
+
+    total = 0
+    for layout in doc.layouts:
+        if layout.is_modelspace:
+            continue
+        total += bake_paper_layout_attrib_inserts_to_wcs_for_pdf(doc, layout.name)
+    return total
+
+
+def revert_paper_layout_attrib_inserts_from_wcs_to_block_local(
+    doc: Drawing,
+    layout_name: str,
+) -> int:
+    """Rewrite baked paper-space ``ATTRIB`` points back to block-local ATTDEF coordinates.
+
+    When a DXF was saved by Logic CAD (:func:`persist_all_paper_layout_attrib_inserts_as_wcs_for_save`)
+    or by CAD with layout-WCS semantics, loading should restore runtime invariants: child attributes
+    match ATTDEF inserts in block space (:func:`apply_attdef_text_geometry_to_attrib`).
+
+    Mirrors :func:`bake_paper_layout_attrib_inserts_to_wcs_for_pdf`:
+
+    - If ``attrib.insert``≈ transformed ATTDEF insert (layout WCS) → copy geometry from ATTDEF.
+    - If ``attrib.insert``≈ ATTDEF insert (already block-local legacy file) → **skip**.
+    - Otherwise ambiguous → **skip**.
+
+    ATTDEF definitions without ``align_point`` cause any leftover baked ``align_point`` on the
+    child to be discarded so block-local parity matches ATTDEF semantics.
+
+    Args:
+        doc: Drawing just loaded into the editor runtime.
+        layout_name: Paper-space layout name.
+
+    Returns:
+        Number of ``ATTRIB`` entities updated.
+    """
+
+    tol = float(PDF_ATTRIB_POSITION_EQ_TOL_MM)
+    n = 0
+    for ins_ent in _iter_paper_layout_inserts(doc, layout_name):
+        bname = str(ins_ent.dxf.name or "").strip()
+        m = ins_ent.matrix44()
+        for attrib in ins_ent.attribs:
+            attdef = _attdef_for_tag(doc, bname, str(attrib.dxf.tag))
+            if attdef is None:
+                continue
+            local_ins = _vec3_from_dxf_point(attdef.dxf.insert)
+            expected_ins = m.transform(local_ins)
+            cur_ins = _vec3_from_dxf_point(attrib.dxf.insert)
+            if _distance_mm(cur_ins, local_ins) <= tol:
+                continue
+            if _distance_mm(cur_ins, expected_ins) > tol:
+                continue
+            apply_attdef_text_geometry_to_attrib(attdef, attrib)
+            ad = attdef.dxf
+            if not ad.hasattr("align_point") or ad.align_point is None:
+                if attrib.dxf.hasattr("align_point"):
+                    try:
+                        attrib.dxf.discard("align_point")
+                    except (AttributeError, KeyError, ValueError):
+                        pass
+            n += 1
+    return n
+
+
+def revert_all_paper_layout_attrib_inserts_from_wcs_after_load(doc: Drawing) -> int:
+    """Run :func:`revert_paper_layout_attrib_inserts_from_wcs_to_block_local` on every paper layout.
+
+    Args:
+        doc: Loaded drawing entering the app's runtime model.
+
+    Returns:
+        Aggregate count of attributes updated.
+    """
+
+    total = 0
+    for layout in doc.layouts:
+        if layout.is_modelspace:
+            continue
+        total += revert_paper_layout_attrib_inserts_from_wcs_to_block_local(doc, layout.name)
+    return total
 
 
 @contextmanager

@@ -62,7 +62,7 @@ class SymbolBlockEditView(QGraphicsView):
         self._len_hud.raise_()
 
     def set_escape_callback(self, cb) -> None:
-        """Register callback invoked on Escape (clears placement tools)."""
+        """Register callback invoked on Escape (preview cancel then tool clear)."""
         self._escape_cb = cb
 
     def last_scene_pos_dxf(self) -> tuple[float, float]:

@@ -147,7 +147,7 @@ class MainWindow(QMainWindow):
             self._block_panel.sketch_line_linetype,
         )
         self._block_view = SymbolBlockEditView(self._block_scene)
-        self._block_view.set_escape_callback(self._block_panel.clear_placement_tools)
+        self._block_view.set_escape_callback(self._block_panel.handle_escape_key)
         self._block_scene.status_message.connect(self._on_block_edit_status_message)
         self._block_panel.attach_scene(self._block_scene)
         self._block_scene.selectionChanged.connect(self._on_block_selection_changed)
@@ -369,7 +369,7 @@ class MainWindow(QMainWindow):
             return
         if QApplication.activeModalWidget() is not None:
             return
-        self._block_panel.clear_placement_tools()
+        self._block_panel.handle_escape_key()
 
     def _update_block_escape_shortcut_enabled(self) -> None:
         """Enable window-level Esc only on the block-edit tab.
