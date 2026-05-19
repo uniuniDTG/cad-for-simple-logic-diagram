@@ -94,6 +94,9 @@ class LogicDiagram:
 
     def mark_modified(self) -> None:
         self._dirty = True
+        from logic_cad.core.text.pdf_like_font_faces import invalidate_pdf_like_font_face_cache
+
+        invalidate_pdf_like_font_face_cache(doc=self.doc)
 
     @classmethod
     def new(cls) -> LogicDiagram:

@@ -233,7 +233,7 @@ class PropertyPanel(
         self._inpage_meta_type.setReadOnly(True)
         self._inpage_peer_uid = QLineEdit()
         self._inpage_peer_uid.setReadOnly(True)
-        self._inpage_link_name_auto = QCheckBox("自動採番（※1, ※2, …）")
+        self._inpage_link_name_auto = QCheckBox("自動採番（*1, *2, …）")
         self._inpage_link_name_auto.setChecked(True)
         self._inpage_link_name_auto.toggled.connect(self._on_inpage_link_name_auto_toggled)
         self._inpage_sym_display = QLineEdit()

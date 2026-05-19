@@ -8,6 +8,7 @@ from typing import Any
 from ezdxf import revcloud
 from ezdxf.document import Drawing
 
+from logic_cad.core.dxf.text_style import merge_logic_cad_text_style_attrib
 from logic_cad.core.geometry.polyline_simplify import douglas_peucker, douglas_peucker_closed
 from logic_cad.core.model.cloud_guide_xdata import (
     build_cloud_pitch_xdata_extra,
@@ -378,7 +379,9 @@ class UserGeometryService:
             text,
             height=float(height),
             rotation=0.0,
-            dxfattribs={"layer": LAYER_ANNOTATION, "linetype": LINETYPE_CONTINUOUS},
+            dxfattribs=merge_logic_cad_text_style_attrib(
+                {"layer": LAYER_ANNOTATION, "linetype": LINETYPE_CONTINUOUS},
+            ),
         )
         e.dxf.insert = insert
         return finalize_new_user_sketch_entity(e, ENTITY_TYPE_USER_TEXT)

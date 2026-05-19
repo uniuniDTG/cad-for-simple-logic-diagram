@@ -10,7 +10,7 @@
 - ステータスバー: キャンバス上のカーソル位置を DXF 図面座標 (mm) で表示。シーン座標は `dxf_from_scene_pos`（`logic_cad/ui/snap_utils.py`）で mm に変換
 - **プロパティパネル**: `logic_cad/ui/panels/property_panel/`。**インポートパスは不変**（`from logic_cad.ui.panels.property_panel import PropertyPanel`）。`widget.py` が QWidget とスタック構成・共通ポート表示、`symbol_section.py` / `wire_section.py` / `block_edit_section.py` が機能別 mixin、`helpers.py` が QMessageBox 共通化と `port_sort_key`。
 - **インアプリ・ブロック編集（BEDIT 風）**: 左タブ「ブロック」。左の一覧は `list_block_editor_block_names`（`logic_cad.core.services.layout_service`）。`PAGE_FROM` / `PAGE_TO` はブロック編集一覧に出す（クロスページ・リンク用定義の編集）。`INPAGE_FROM` / `INPAGE_TO` は一覧に出さない（インページ・リンクは専用 UI）。これらはいずれもパレット（`list_palette_block_names`）からは隠す。編集は **スクラッチ `Drawing`**（`BlockEditSession` / `logic_cad/core/services/block_edit_session.py`）上で行い、**本体へ適用**で `doc.blocks[name]` の中身を差し替え。**適用はメインの `HistoryService` に積まない**（スクラッチ側の Undo のみ）。新規/開く/閉じる/図枠・シンボルライブラリ操作は `BlockEditPanel.request_end_session_for_nav` で先にセッション終了。**同一 `LD_PORT_*` レイヤへの POINT 重複は禁止**（`block_edit_helpers.port_layer_is_taken`）。キャンバス実装: `logic_cad/ui/symbol_block_editor/`
-- **INPAGE_REF（同一紙面上のリンク）**: LD_APP の `sym` + ATTRIB `SYM` が表示文字。自動採番は `inpage_link_name_auto` が省略/`"1"` のペアだけが ※1, ※2…（手動 `"0"` のペアは連番を消費しない）。プロパティから手動文字列を設定するとペア両端が同期され、`refresh_inpage_ref_syms_on_layout` が他の自動ペアの番号を詰め直す。実装: `logic_cad/core/pages/inpage_ref.py` / `SymbolService.set_inpage_ref_link_display`
+- **INPAGE_REF（同一紙面上のリンク）**: LD_APP の `sym` + ATTRIB `SYM` が表示文字。自動採番は `inpage_link_name_auto` が省略/`"1"` のペアだけが ※1, ※2…（手動 `"0"` のペアは連番を消費しない）。プロパティから手動文字列を設定するとペア両端が同期され、`refresh_inpage_ref_syms_on_layout` が他の自動ペアの番号を詰め直す。パレット D&D では `logic_cad/ui/dialogs/inpage_link_place_dialog.py` が表示を決め、手動選択時は配置直後に `set_inpage_ref_link_display` が走る。実装: `logic_cad/core/pages/inpage_ref.py` / `SymbolService.set_inpage_ref_link_display`
 - 起動引数: `logic_cad/app/main.py`
 - ルーティングプロファイルの env 上書き: `logic_cad/core/routing/profile.py`（`apply_routing_env_overrides`）
 - シンボル移動後の再配線の区間計測: `logic_cad/core/debug/routing_perf.py`（`LOGIC_CAD_PERF_ROUTING=1`）
@@ -22,7 +22,8 @@
 - ユーザー直線ツール: ツールバーの直線ボタンを右クリックすると、次に描く線の線種（CONTINUOUS / DASHED / CENTER）を選べる。状態は `DiagramScene` の `user_sketch_line_default_linetype` / `set_user_sketch_line_default_linetype`
 - メインキャンバスの注釈テキスト配置・ブロック編集の `LD_TEXT` 配置: 共通ダイアログ `logic_cad/ui/dialogs/user_text_place_dialog.py` の `prompt_dxf_text_string_and_height`（文字列＋字高 mm）。メインの既定字高の初期値は `USER_TEXT_DEFAULT_HEIGHT_MM`
 - 文字列の検索・置換: `logic_cad/core/services/text_find_replace.py`（`TextSearchHit` / `list_text_search_hits`、対象は `SYM` / `LABEL*` と `USER_TEXT` 等）。`logic_cad/ui/text_search_navigate.py`（`apply_text_search_hit`）。UI: `find_replace_dialog.py`、Ctrl+F で**非モーダル**検索（前検索 / 次検索 / キャンセル、F3 / Shift+F3、パネル非表示時もメインにフォーカスがあれば可）。**検索語と各オプションは図面に保存されない**（セッション内の UI メモリのみ）。Ctrl+R はモーダル置換
-- **アプリのユーザ設定（図面外）**: **ファイル** → **ユーザ設定…**。永続化は `logic_cad/ui/app_user_settings.py` の `QSettings`（**Ini 形式**）。起動時に `logic_cad/app/main.py` で `QApplication.setOrganizationName("LogicCAD")` / `setApplicationName("Logic CAD")` を設定しているため、保存先は OS の既定ユーザ設定ディレクトリ配下の `.ini`（例: Windows では `%LOCALAPPDATA%` 系。実際のパスは実行時に `QSettings.fileName()` で確認可能）。クロスヘアは `DiagramView` がビューポート座標でオーバーレイ描画（`none` / `full` / `local`）。**レガシー Ini の `mode=both` は読み込み時に `full` として扱う**（保存はされない）。交点の中空□は Ini キー `crosshair/center_box_side_px`（0＝□なし、十字のみ）。
+- **アプリのユーザ設定（図面外）**: **ファイル** → **ユーザ設定…**。永続化は `logic_cad/ui/app_user_settings.py` の `QSettings`（**Ini 形式**）。起動時に `logic_cad/app/main.py` で `QApplication.setOrganizationName("LogicCAD")` / `setApplicationName("Logic CAD")` を設定しているため、保存先は OS の既定ユーザ設定ディレクトリ配下の `.ini`（例: Windows では `%LOCALAPPDATA%` 系。実際のパスは実行時に `QSettings.fileName()` で確認可能）。クロスヘアは `logic_cad/ui/views/crosshair_overlay.py` の `CrosshairOverlay`（**`DiagramView` の子**。`viewport` 直下だと Windows でシーンの下に隠れる）が `WA_TranslucentBackground` で描画し、**シーン本体は再描画しない**（`none` / `full` / `local`）。**レガシー Ini の `mode=both` は読み込み時に `full` として扱う**（保存はされない）。交点の中空□は Ini キー `crosshair/center_box_side_px`（0＝□なし、十字のみ）。
+- **メイン幾何キャンバスのマウス移動負荷**: `DiagramView`（`logic_cad/ui/views/diagram_view.py`）が `mouseMoveEvent` で座標を記録し、16ms 単発タイマーでステータス座標・長さ HUD・`DiagramScene.update_pointer_feedback`（ワイヤセグメント hover / OSNAP / connect-bbox hover）をまとめて実行。ポートツールチップは 50ms タイマー。配線プレビュー・ドラッグ・スケッチ中は `DiagramScene.pointer_feedback_needs_immediate_update()` が真のとき毎イベント同期。ワイヤ hover は追跡中の 1 本だけ更新（全 `items()` 走査なし）。デバッグの `--show-connect-bbox` / `--show-routing-bbox` は `drawForeground` で障害物 AABB を描画；connect-bbox は `access_ports` の fingerprint が変わったときだけ `build_routing_obstacles` を再実行（routing-bbox ベースは `rebuild()` までキャッシュ）。
 - メインウィンドウのタイトルバー表示（`Logic CAD vX.Y.Z ...`）: `logic_cad/core/model/constants.py` の `APP_DISPLAY_NAME_WITH_VERSION` を `logic_cad/ui/main_window/document_actions.py` の `build_window_title` が参照して組み立てる。
 - UIログウィンドウ: **表示** → **ログ…**。`logic_cad/ui/logging/log_store.py` が `stdout/stderr` をプロセス内でキャプチャし、`logic_cad/ui/panels/log_window_dialog.py` が `QPlainTextEdit` へタイマー間引き（既定 80ms）で反映する。大量出力時の負荷を抑えるため、履歴はリングバッファ（既定 10,000 行）に制限される。
 
@@ -301,6 +302,7 @@ python -m logic_cad.app.main --debug
   DXFエンティティではないUI生成テキスト（`USER_TEXT` など）を同じ構造へ揃える。
 - `ui_font_family_chain(...)` / `resolve_pdf_font_face_for_ui_family_chain(...)` / `apply_render_context_fonts_for_pdf_like_ui(...)`  
   UIの family chain は **（プロジェクト優先フォントがあればそれ）→ DXF style 由来 → `font_family_candidates` 順 → `sans-serif`**。プロジェクト優先は **プロジェクト設定 → 優先フォント…** で選び、ドキュメントアンカー POINT の ``LD_DOC`` XDATA キー `preferred_font_family` に保存する（未設定・空＝従来どおり DXF 優先）。PDF（matplotlib 経路）は **TEXTSTYLE ごと**に同じチェーンで `FontFace` を解決し、`RenderContext.fonts` を上書きする。スタイル単位の優先ファミリは `font_family_preferred_for_named_style` / `font_family_preferred_for_style_table_key` で UI と揃える。既定スタイルのみ必要な場合は `preferred_pdf_font_face()`（内部で上記チェーンのデフォルト起点を使用）。
+- **Qt キャンバス（path テキスト）** は `logic_cad/core/text/pdf_like_font_faces.py` の `get_pdf_like_font_face_table(doc)` で上記 PDF と同一の `RenderContext` + `apply_render_context_fonts_for_pdf_like_ui` 結果をドキュメント単位キャッシュし、`NormalizedTextLayout.outline_font_face` 経由で `block_paint._qfont_from_font_face` が **1 つの解決済みフォント**から `QFont` を構築する（`QFont.setFamilies` の長チェーンは使わない）。`QFont.StyleStrategy.NoFontMerging`（Qt6; 旧 API 名 ``PreferNoFontMerging`` があればそちらも試す）を付与（プラットフォームにより効果は異なる）。キャッシュ無効化: 優先フォント変更、`LogicDiagram.mark_modified()`、`readfile` / `new_document`。
 - `decode_dxf_unicode_escapes(...)`  
   DXF の特殊 Unicode エスケープ（例: `\U+3042`）を UI/PDF で共通解釈する。`normalize_newlines(...)` は内部でこの関数を通す。PDF 側は `pdf_export_service._PdfExportFrontend` が描画直前にテキスト系エンティティをクローンしてこのデコードを適用し、元の DXF エンティティを変更しない。
 
@@ -314,7 +316,8 @@ python -m logic_cad.app.main --debug
 
 - MTEXTの全仕様（flow方向、段組、リッチ書式）をUIで完全再現するものではない。
 - フォント実体はOS依存のため、同じファミリ名でも環境ごとに厳密一致しないことがある。
-- PDF の `find_best_match` と Qt の `QFont` は同一チェーンでも実ファイルの選び方が完全一致しない場合がある（意図は「同じ優先順・同じスタイル別方針」）。
+- Qt path テキストは PDF と同じ `FontFace` テーブルを共有するが、グリフ欠け・メトリクス差は OS/Qt の描画エンジン依存でゼロにはならない。
+- **他CAD（BricsCAD 等）向け**: DXF の TEXTSTYLE ``LOGIC_CAD_FONT``（既定フォントファイルは ``msgothic.ttc`` 系）を定義し、アプリ生成の TEXT/MTEXT/ATTDEF は原則そのスタイルを参照する。保存時に ``Standard`` / 空 / ``Annotative`` の文字エンティティは ``LOGIC_CAD_FONT`` へ付け替える（他CAD由来の明示スタイル名は維持）。プロジェクト **優先フォント…** は UI/PDF の family chain 用（``LD_DOC``）であり、設定時は ``LOGIC_CAD_FONT`` の単一フォントファイルも可能な範囲で同期する（実装は ``logic_cad/core/dxf/text_style.py``）。**アセットの ``frame_template.dxf`` を差し替えなくても**、取り込んだ図枠ブロック内テキストは当該プロジェクトの保存で付け替え対象になる。
 
 ---
 

@@ -63,7 +63,7 @@ def _resolve_block_for_payload(doc: Drawing, payload: str) -> tuple[str, str] | 
         ensure_inpage_reference_blocks(doc)
         if BLOCK_INPAGE_FROM not in doc.blocks:
             return None
-        return BLOCK_INPAGE_FROM, "※1"
+        return BLOCK_INPAGE_FROM, "*1"
     if kind == "block":
         if not name or name not in doc.blocks:
             return None

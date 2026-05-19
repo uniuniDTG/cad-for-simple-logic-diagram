@@ -9,6 +9,7 @@ from ezdxf.document import Drawing
 
 from logic_cad.core.attrib_tags import FRAME_ATTDEF_TAGS
 from logic_cad.core.debug.debug_log import logic_cad_log
+from logic_cad.core.dxf.text_style import merge_logic_cad_text_style_attrib
 from logic_cad.core.model.constants import (
     BLOCK_CONTENTS_HEADER,
     BLOCK_CONTENTS_ROW,
@@ -266,13 +267,15 @@ def _regenerate_toc_mtext_fallback(doc: Drawing, ls: LayoutService, name: str, p
     uid = new_uid()
     mt = blk.add_mtext(
         body,
-        dxfattribs={
-            "layer": LAYER_TOC,
-            "char_height": 2.8,
-            "width": 175.0,
-            "insert": (18.0, 250.0, 0.0),
-            "attachment_point": 1,
-        },
+        dxfattribs=merge_logic_cad_text_style_attrib(
+            {
+                "layer": LAYER_TOC,
+                "char_height": 2.8,
+                "width": 175.0,
+                "insert": (18.0, 250.0, 0.0),
+                "attachment_point": 1,
+            },
+        ),
     )
     set_entity_xdata(mt, build_ld_app_tags("1", uid, TOC_TEXT_TYPE))
 

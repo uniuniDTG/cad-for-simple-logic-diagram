@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
     QFont,
+    QFontDatabase,
     QFontMetricsF,
     QPainter,
     QPainterPath,
@@ -26,6 +28,8 @@ if TYPE_CHECKING:
 from logic_cad.core.attrib_tags import is_frame_attdef_tag, is_supported_attdef_tag
 from logic_cad.core.model.constants import LAYER_CONTENTS_AREA
 from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
+from logic_cad.core.text.pdf_like_font_faces import get_pdf_like_font_face_table
+from logic_cad.ui.app_font import resolve_app_ui_font_family
 from logic_cad.ui.dxf_display_color import entity_effective_linetype, entity_stroke_qcolor
 from logic_cad.ui.items.wire_item import apply_dxf_linetype_to_pen
 
@@ -46,6 +50,71 @@ def glyph_upright_extra_deg(insert_rotation_deg: float) -> float:
 
 # Reference point size for outline text path (actual height → cap_mm via uniform scale).
 _ATTDEF_TEXT_REF_PT = 10.0
+
+# Cache QFont family names resolved from outline font file paths.
+_app_font_family_by_path: dict[str, str] = {}
+# Paths that failed addApplicationFont (avoid re-opening every paint, e.g. msgothic.ttc).
+_app_font_failed_paths: set[str] = set()
+
+
+def _qfont_from_font_face(
+    face: Any | None,
+    *,
+    width_fac: float = 1.0,
+    font_family: str = "Arial",
+) -> QFont:
+    """Build QFont from a PDF-aligned ezdxf FontFace (single resolved face, no merging).
+
+    Args:
+        face: ezdxf ``FontFace`` from :func:`get_pdf_like_font_face_table`, or ``None``.
+        width_fac: DXF width factor mapped to Qt stretch percent.
+        font_family: Fallback family when *face* is missing or unusable.
+
+    Returns:
+        Configured ``QFont`` at reference point size for path text metrics.
+    """
+
+    font = QFont()
+    # Qt6: ``NoFontMerging``; older Qt builds may expose ``PreferNoFontMerging``.
+    no_merge = getattr(
+        QFont.StyleStrategy,
+        "PreferNoFontMerging",
+        QFont.StyleStrategy.NoFontMerging,
+    )
+    font.setStyleStrategy(font.styleStrategy() | no_merge)
+    resolved_family = ""
+    if face is not None:
+        filename = str(getattr(face, "filename", "") or "").strip()
+        family_from_face = str(getattr(face, "family", "") or "").strip()
+        # Prefer Qt system registration (no direct TTF/TTC open). Stops qpa spam on mouse move.
+        if family_from_face and QFontDatabase.hasFamily(family_from_face):
+            resolved_family = family_from_face
+        elif filename:
+            path = Path(filename)
+            path_key = str(path.resolve()) if path.is_file() else filename
+            if path_key not in _app_font_failed_paths:
+                resolved_family = _app_font_family_by_path.get(path_key, "")
+                if (
+                    not resolved_family
+                    and path.is_file()
+                    and path.suffix.lower() == ".ttf"
+                ):
+                    font_id = QFontDatabase.addApplicationFont(path_key)
+                    if font_id >= 0:
+                        families = QFontDatabase.applicationFontFamilies(font_id)
+                        if families:
+                            resolved_family = str(families[0])
+                            _app_font_family_by_path[path_key] = resolved_family
+                    else:
+                        _app_font_failed_paths.add(path_key)
+    if resolved_family:
+        font.setFamily(resolved_family)
+    else:
+        font.setFamily(str(font_family or resolve_app_ui_font_family()))
+    stretch = int(max(10, min(400, round(100 * width_fac))))
+    font.setStretch(stretch)
+    font.setPointSizeF(_ATTDEF_TEXT_REF_PT)
+    return font
 
 
 def _text_reference_height(path_height: float, line_height: float, cap_height: float) -> float:
@@ -127,20 +196,17 @@ def paint_text_path_mm(
     fit_mode: str = "none",
     fill: QColor | None = None,
     font_family: str = "Arial",
-    font_families: tuple[str, ...] | None = None,
+    outline_font_face: Any | None = None,
 ) -> None:
     """Draw text with outline path scaled so bounding height = cap_mm (item / scene mm)."""
     if cap_mm < 1e-12 or not (text or "").strip():
         return
     col = fill if fill is not None else QColor(220, 220, 220)
-    font = QFont()
-    if font_families:
-        font.setFamilies(list(font_families))
-    else:
-        font.setFamily(font_family)
-    stretch = int(max(10, min(400, round(100 * width_fac))))
-    font.setStretch(stretch)
-    font.setPointSizeF(_ATTDEF_TEXT_REF_PT)
+    font = _qfont_from_font_face(
+        outline_font_face,
+        width_fac=width_fac,
+        font_family=font_family,
+    )
     fm = QFontMetricsF(font)
     adv = float(fm.horizontalAdvance(text))
     path = QPainterPath()
@@ -208,19 +274,16 @@ def text_path_bounds_item_local(
     fit_length_mm: float = 0.0,
     fit_mode: str = "none",
     font_family: str = "Arial",
-    font_families: tuple[str, ...] | None = None,
+    outline_font_face: Any | None = None,
 ) -> QRectF | None:
     """Axis-aligned bounds of ``paint_text_path_mm`` output in item-local coords (mm)."""
     if cap_mm < 1e-12 or not (text or "").strip():
         return None
-    font = QFont()
-    if font_families:
-        font.setFamilies(list(font_families))
-    else:
-        font.setFamily(font_family)
-    stretch = int(max(10, min(400, round(100 * width_fac))))
-    font.setStretch(stretch)
-    font.setPointSizeF(_ATTDEF_TEXT_REF_PT)
+    font = _qfont_from_font_face(
+        outline_font_face,
+        width_fac=width_fac,
+        font_family=font_family,
+    )
     fm = QFontMetricsF(font)
     adv = float(fm.horizontalAdvance(text))
     path = QPainterPath()
@@ -307,7 +370,7 @@ def _wrap_text_line_to_width_mm(
     width_mm: float,
     width_fac: float,
     font_family: str,
-    font_families: tuple[str, ...] | None,
+    outline_font_face: Any | None,
 ) -> list[str]:
     """Greedy-wrap one line to fit target width (mm) using current text metrics."""
 
@@ -324,7 +387,7 @@ def _wrap_text_line_to_width_mm(
             valign=3,
             width_fac=width_fac,
             font_family=font_family,
-            font_families=font_families,
+            outline_font_face=outline_font_face,
         )
         return br is None or br.width() <= width_mm + 1e-6
 
@@ -368,7 +431,7 @@ def mtext_wrapped_lines_mm(
     width_mm: float = 0.0,
     width_fac: float = 1.0,
     font_family: str = "Arial",
-    font_families: tuple[str, ...] | None = None,
+    outline_font_face: Any | None = None,
 ) -> list[str]:
     """Return wrapped multiline content for MTEXT-like path rendering."""
 
@@ -385,7 +448,7 @@ def mtext_wrapped_lines_mm(
                 width_mm=width_mm,
                 width_fac=width_fac,
                 font_family=font_family,
-                font_families=font_families,
+                outline_font_face=outline_font_face,
             )
         )
     return out
@@ -401,7 +464,7 @@ def mtext_path_bounds_item_local(
     valign: int = 3,
     width_fac: float = 1.0,
     font_family: str = "Arial",
-    font_families: tuple[str, ...] | None = None,
+    outline_font_face: Any | None = None,
 ) -> QRectF | None:
     """Bounds of multiline path text with attachment-style anchoring."""
 
@@ -413,7 +476,7 @@ def mtext_path_bounds_item_local(
         width_mm=width_mm,
         width_fac=width_fac,
         font_family=font_family,
-        font_families=font_families,
+        outline_font_face=outline_font_face,
     )
     if not lines:
         return None
@@ -429,7 +492,7 @@ def mtext_path_bounds_item_local(
             valign=3,
             width_fac=width_fac,
             font_family=font_family,
-            font_families=font_families,
+            outline_font_face=outline_font_face,
         )
         if r is None or r.isEmpty():
             continue
@@ -454,7 +517,7 @@ def paint_mtext_path_mm(
     width_fac: float = 1.0,
     fill: QColor | None = None,
     font_family: str = "Arial",
-    font_families: tuple[str, ...] | None = None,
+    outline_font_face: Any | None = None,
 ) -> None:
     """Draw multiline path text anchored like MTEXT in item/scene millimeters."""
 
@@ -466,7 +529,7 @@ def paint_mtext_path_mm(
         width_mm=width_mm,
         width_fac=width_fac,
         font_family=font_family,
-        font_families=font_families,
+        outline_font_face=outline_font_face,
     )
     if not lines:
         return
@@ -479,7 +542,7 @@ def paint_mtext_path_mm(
         valign=3,
         width_fac=width_fac,
         font_family=font_family,
-        font_families=font_families,
+        outline_font_face=outline_font_face,
     )
     if body is None:
         return
@@ -499,7 +562,7 @@ def paint_mtext_path_mm(
             width_fac=width_fac,
             fill=fill,
             font_family=font_family,
-            font_families=font_families,
+            outline_font_face=outline_font_face,
         )
     painter.restore()
 
@@ -518,6 +581,7 @@ def supported_attdefs_bounds_item_local(
     """Union of ATTDEF text bounds using instance strings (same rules as ``paint_block_attdefs``)."""
     if block_name not in doc.blocks:
         return None
+    face_table = get_pdf_like_font_face_table(doc)
     blk = doc.blocks.get(block_name)
     inst = instance_attribs or {}
     out: QRectF | None = None
@@ -552,7 +616,11 @@ def supported_attdefs_bounds_item_local(
         if not t.strip():
             continue
 
-        layout = normalize_dxf_text_entity(ent, text_override=t)
+        layout = normalize_dxf_text_entity(
+            ent,
+            text_override=t,
+            pdf_like_face_table=face_table,
+        )
         pos = _local_pt(layout.anchor_x, layout.anchor_y, scale_x, scale_y)
         sf = min(abs(scale_x), abs(scale_y)) if scale_x and scale_y else 1.0
         cap_mm = float(layout.height_mm) * sf
@@ -569,7 +637,7 @@ def supported_attdefs_bounds_item_local(
             fit_length_mm=layout.render_fit_length_mm,
             fit_mode=layout.render_fit_mode,
             font_family=layout.font_family,
-            font_families=layout.font_families,
+            outline_font_face=layout.outline_font_face,
         )
         if br is None or br.isEmpty():
             continue
@@ -829,6 +897,7 @@ def paint_block_text_entities(
     pen.setCosmetic(True)
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
+    face_table = get_pdf_like_font_face_table(doc)
     drawn = False
     for ent in blk:
         dt = str(ent.dxftype()).upper()
@@ -837,7 +906,7 @@ def paint_block_text_entities(
         layer = str(getattr(ent.dxf, "layer", ""))
         if layer == LAYER_CONTENTS_AREA or layer.startswith("LD_PORT_"):
             continue
-        layout = normalize_dxf_text_entity(ent)
+        layout = normalize_dxf_text_entity(ent, pdf_like_face_table=face_table)
         if not layout.text.strip():
             continue
         pos = _local_pt(layout.anchor_x, layout.anchor_y, scale_x, scale_y)
@@ -856,7 +925,7 @@ def paint_block_text_entities(
                 width_fac=layout.render_width_factor,
                 fill=pen.color(),
                 font_family=layout.font_family,
-                font_families=layout.font_families,
+                outline_font_face=layout.outline_font_face,
             )
         else:
             paint_text_path_mm(
@@ -872,7 +941,7 @@ def paint_block_text_entities(
                 fit_mode=layout.render_fit_mode,
                 fill=pen.color(),
                 font_family=layout.font_family,
-                font_families=layout.font_families,
+                outline_font_face=layout.outline_font_face,
             )
         drawn = True
     return drawn
@@ -905,6 +974,7 @@ def paint_block_attdefs(
     pen.setCosmetic(True)
     painter.setPen(pen)
     painter.setBrush(Qt.NoBrush)
+    face_table = get_pdf_like_font_face_table(doc)
 
     for ent in blk:
         if ent.dxftype() != "ATTDEF":
@@ -942,7 +1012,12 @@ def paint_block_attdefs(
         h_override = None
         if tag_u == "SYM" and sym_height_mm is not None and float(sym_height_mm) > 0:
             h_override = max(0.25, float(sym_height_mm))
-        layout = normalize_dxf_text_entity(ent, text_override=text, height_override_mm=h_override)
+        layout = normalize_dxf_text_entity(
+            ent,
+            text_override=text,
+            height_override_mm=h_override,
+            pdf_like_face_table=face_table,
+        )
         pos = _local_pt(layout.anchor_x, layout.anchor_y, scale_x, scale_y)
 
         sf = min(abs(scale_x), abs(scale_y)) if scale_x and scale_y else 1.0
@@ -962,7 +1037,7 @@ def paint_block_attdefs(
             fit_mode=layout.render_fit_mode,
             fill=pen.color(),
             font_family=layout.font_family,
-            font_families=layout.font_families,
+            outline_font_face=layout.outline_font_face,
         )
         drawn = True
     return drawn

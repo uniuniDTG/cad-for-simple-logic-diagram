@@ -10,6 +10,18 @@ from ezdxf.document import Drawing
 from ezdxf.tools.standards import setup_linetypes
 
 from logic_cad.core.debug.debug_log import logic_cad_log
+from logic_cad.core.dxf.attrib_geometry_sync import (
+    AttribGeomSnapshot,
+    persist_all_paper_layout_attrib_inserts_as_wcs_for_save,
+    restore_paper_layout_insert_attrib_geometry,
+    revert_all_paper_layout_attrib_inserts_from_wcs_after_load,
+    snapshot_paper_layout_insert_attrib_geometry,
+)
+from logic_cad.core.dxf.text_style import (
+    ensure_logic_cad_font_style,
+    reassign_default_styles_on_text_entities_to_logic_cad_font,
+    set_default_textstyle_header_to_logic_cad,
+)
 from logic_cad.core.model.constants import (
     ALL_LAYERS,
     LAYER_CONTENTS_AREA,
@@ -46,15 +58,12 @@ from logic_cad.core.model.constants import (
     LINETYPE_LOGIC,
     LINETYPE_VALUE,
 )
-from logic_cad.core.model.document_meta import apply_document_meta_stamp, ensure_regapp_document_meta
-from logic_cad.core.model.xdata import ensure_regapp
-from logic_cad.core.dxf.attrib_geometry_sync import (
-    AttribGeomSnapshot,
-    persist_all_paper_layout_attrib_inserts_as_wcs_for_save,
-    restore_paper_layout_insert_attrib_geometry,
-    revert_all_paper_layout_attrib_inserts_from_wcs_after_load,
-    snapshot_paper_layout_insert_attrib_geometry,
+from logic_cad.core.model.document_meta import (
+    apply_document_meta_stamp,
+    ensure_regapp_document_meta,
+    read_project_preferred_font_family,
 )
+from logic_cad.core.model.xdata import ensure_regapp
 from logic_cad.core.pages.page_order import apply_paper_layout_taborder_by_name
 from logic_cad.core.paper_layout_configure import configure_paper_layout_a4_landscape
 from logic_cad.core.paper_layout_strip import strip_ld_contents_area_all_paper_layouts
@@ -145,6 +154,11 @@ def new_document() -> Drawing:
     ensure_regapp(doc)
     ensure_regapp_document_meta(doc)
     apply_document_meta_stamp(doc)
+    ensure_logic_cad_font_style(doc, preferred_family=read_project_preferred_font_family(doc))
+    set_default_textstyle_header_to_logic_cad(doc)
+    from logic_cad.core.text.pdf_like_font_faces import invalidate_pdf_like_font_face_cache
+
+    invalidate_pdf_like_font_face_cache(doc=doc)
     return doc
 
 
@@ -230,6 +244,10 @@ def readfile(path: str | Path) -> Drawing:
             configure_paper_layout_a4_landscape(doc, layout.name)
     strip_ld_contents_area_all_paper_layouts(doc)
     revert_all_paper_layout_attrib_inserts_from_wcs_after_load(doc)
+    ensure_logic_cad_font_style(doc, preferred_family=read_project_preferred_font_family(doc))
+    from logic_cad.core.text.pdf_like_font_faces import invalidate_pdf_like_font_face_cache
+
+    invalidate_pdf_like_font_face_cache(doc=doc)
     return doc
 
 
@@ -247,6 +265,8 @@ def saveas(doc: Drawing, path: str | Path) -> None:
     strip_ld_contents_area_all_paper_layouts(doc)
     ensure_standard_layers(doc)
     ensure_standard_linetypes(doc)
+    ensure_logic_cad_font_style(doc, preferred_family=read_project_preferred_font_family(doc))
+    reassign_default_styles_on_text_entities_to_logic_cad_font(doc)
     if LAYER_CONTENTS_AREA in doc.layers:
         doc.layers.get(LAYER_CONTENTS_AREA).off()
     if LAYER_DOC_META in doc.layers:

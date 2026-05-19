@@ -64,7 +64,7 @@ from logic_cad.ui.symbol_block_editor.scene import (
 from logic_cad.ui.scene import DiagramScene
 from logic_cad.ui.dialog_helpers import dialog_exec_accepted, question_yes_no, raise_modeless
 from logic_cad.ui.layer_lineweight_dialog import LayerLineweightDialog
-from logic_cad.ui.styles import APP_STYLESHEET
+from logic_cad.ui.styles.app_stylesheet import build_app_stylesheet
 from logic_cad.ui.toast import show_toast
 from logic_cad.ui.views.diagram_view import DiagramView
 from logic_cad.ui.app_user_settings import AppUserSettings, load_app_user_settings, save_app_user_settings
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setStyleSheet(APP_STYLESHEET)
+        self.setStyleSheet(build_app_stylesheet())
         self._diagram = LogicDiagram.new()
 
         _tb = create_wire_sketch_tool_buttons(self)
@@ -211,6 +211,8 @@ class MainWindow(QMainWindow):
         self._shortcut_block_esc.activated.connect(self._on_block_escape_key)
 
         self.setCentralWidget(layout.build_central_widget(self))
+        # Viewport overlay geometry is invalid until the view is in the layout tree.
+        self._view.apply_user_settings(self._app_user_settings)
         self._update_block_escape_shortcut_enabled()
 
         self._status_cursor = QLabel("—")

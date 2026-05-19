@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QLineF, QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer, Signal
 from PySide6.QtGui import (
-    QColor,
     QContextMenuEvent,
+    QCursor,
+    QEnterEvent,
     QKeyEvent,
     QMouseEvent,
-    QPaintEvent,
     QPainter,
-    QPen,
     QResizeEvent,
+    QShowEvent,
     QTransform,
     QWheelEvent,
 )
@@ -29,157 +29,10 @@ from logic_cad.ui.graphics_view_navigation import apply_wheel_pan_scroll_delta, 
 from logic_cad.ui.scene import DiagramScene
 from logic_cad.ui.snap_utils import dxf_from_scene_pos
 from logic_cad.ui.view_fit_rect import default_a4_fit_rect_mm
+from logic_cad.ui.views.crosshair_overlay import CrosshairOverlay, crosshair_paint_bounds
 
-_CROSSHAIR_PEN_PAD_PX = 3
-
-
-def _crosshair_paint_bounds(
-    mode: CrosshairMode,
-    cx: int,
-    cy: int,
-    vr: QRect,
-    local_half_px: int,
-    center_box_side_px: int,
-    pen_pad: int = _CROSSHAIR_PEN_PAD_PX,
-) -> QRect:
-    """Return a viewport rectangle covering the crosshair and center box for one cursor position.
-
-    Args:
-        mode: Crosshair display mode.
-        cx: Cursor x in viewport pixels.
-        cy: Cursor y in viewport pixels.
-        vr: Viewport rectangle.
-        local_half_px: Half arm length for ``LOCAL`` mode (ignored for ``FULL``).
-        center_box_side_px: Hollow square side at the intersection (0 = none).
-        pen_pad: Extra margin around ink for dirty-region updates.
-
-    Returns:
-        Bounding rectangle clipped to the viewport; empty when ``mode`` is ``NONE``.
-    """
-
-    if mode == CrosshairMode.NONE:
-        return QRect()
-    box_r = QRect()
-    if center_box_side_px > 0:
-        left = cx - center_box_side_px // 2
-        top = cy - center_box_side_px // 2
-        box_r = QRect(
-            left - pen_pad,
-            top - pen_pad,
-            center_box_side_px + 2 * pen_pad,
-            center_box_side_px + 2 * pen_pad,
-        )
-    if mode == CrosshairMode.FULL:
-        h_strip = QRect(vr.left(), cy - pen_pad, vr.width(), 2 * pen_pad + 1)
-        v_strip = QRect(cx - pen_pad, vr.top(), 2 * pen_pad + 1, vr.height())
-        return h_strip.united(v_strip).united(box_r).intersected(vr)
-    h = max(1, local_half_px)
-    arm_h = QRect(cx - h - pen_pad, cy - pen_pad, 2 * (h + pen_pad) + 1, 2 * pen_pad + 1)
-    arm_v = QRect(cx - pen_pad, cy - h - pen_pad, 2 * pen_pad + 1, 2 * (h + pen_pad) + 1)
-    return arm_h.united(arm_v).united(box_r).intersected(vr)
-
-
-def _paint_crosshair_full_scene_mapped(
-    view: QGraphicsView,
-    painter: QPainter,
-    ix: int,
-    iy: int,
-    vr: QRect,
-    side: int,
-) -> None:
-    """Draw full-span crosshair in scene coordinates (cosmetic pen = 1 device pixel)."""
-
-    if side <= 0:
-        p_h0 = view.mapToScene(QPoint(vr.left(), iy))
-        p_h1 = view.mapToScene(QPoint(vr.right(), iy))
-        p_v0 = view.mapToScene(QPoint(ix, vr.top()))
-        p_v1 = view.mapToScene(QPoint(ix, vr.bottom()))
-        painter.drawLine(QLineF(p_h0, p_h1))
-        painter.drawLine(QLineF(p_v0, p_v1))
-        return
-    left = ix - side // 2
-    top = iy - side // 2
-    right_excl = left + side
-    bottom_excl = top + side
-    if left - 1 >= vr.left():
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(vr.left(), iy)), view.mapToScene(QPoint(left - 1, iy)))
-        )
-    if right_excl <= vr.right():
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(right_excl, iy)), view.mapToScene(QPoint(vr.right(), iy)))
-        )
-    if top - 1 >= vr.top():
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix, vr.top())), view.mapToScene(QPoint(ix, top - 1)))
-        )
-    if bottom_excl <= vr.bottom():
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix, bottom_excl)), view.mapToScene(QPoint(ix, vr.bottom())))
-        )
-
-
-def _paint_crosshair_local_scene_mapped(
-    view: QGraphicsView,
-    painter: QPainter,
-    ix: int,
-    iy: int,
-    h: int,
-    side: int,
-) -> None:
-    """Draw short crosshair arms in scene coordinates."""
-
-    if side <= 0:
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix - h, iy)), view.mapToScene(QPoint(ix + h, iy)))
-        )
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix, iy - h)), view.mapToScene(QPoint(ix, iy + h)))
-        )
-        return
-    left = ix - side // 2
-    top = iy - side // 2
-    right_excl = left + side
-    bottom_excl = top + side
-    x_lo, x_hi = ix - h, ix + h
-    x2 = min(x_hi, left - 1)
-    if x_lo <= x2:
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(x_lo, iy)), view.mapToScene(QPoint(x2, iy)))
-        )
-    x1 = max(x_lo, right_excl)
-    if x1 <= x_hi:
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(x1, iy)), view.mapToScene(QPoint(x_hi, iy)))
-        )
-    y_lo, y_hi = iy - h, iy + h
-    y2 = min(y_hi, top - 1)
-    if y_lo <= y2:
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix, y_lo)), view.mapToScene(QPoint(ix, y2)))
-        )
-    y1 = max(y_lo, bottom_excl)
-    if y1 <= y_hi:
-        painter.drawLine(
-            QLineF(view.mapToScene(QPoint(ix, y1)), view.mapToScene(QPoint(ix, y_hi)))
-        )
-
-
-def _paint_crosshair_center_box_scene(
-    view: QGraphicsView,
-    painter: QPainter,
-    ix: int,
-    iy: int,
-    side: int,
-) -> None:
-    """Draw the hollow square at the crosshair center in scene coordinates."""
-
-    if side <= 0:
-        return
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    tl = view.mapToScene(QPoint(ix - side // 2, iy - side // 2))
-    br = view.mapToScene(QPoint(ix - side // 2 + side, iy - side // 2 + side))
-    painter.drawRect(QRectF(tl, br).normalized())
+_POINTER_FEEDBACK_INTERVAL_MS = 16
+_TOOLTIP_INTERVAL_MS = 50
 
 
 class DiagramView(QGraphicsView):
@@ -215,6 +68,20 @@ class DiagramView(QGraphicsView):
         self._crosshair_local_half_px: int = DEFAULT_CROSSHAIR_LOCAL_HALF_EXTENT_PX
         self._crosshair_center_box_side_px: int = 0
         self._crosshair_viewport_pos: QPoint | None = None
+        self._pending_viewport_pos: QPoint | None = None
+        self._last_tool_tip: str = ""
+        # Overlay must be a child of the view, not the viewport (transparent widgets on the
+        # viewport are not composited over QGraphicsView's scene on Windows).
+        self._crosshair_overlay = CrosshairOverlay(self)
+        self._crosshair_overlay.hide()
+        self._pointer_feedback_timer = QTimer(self)
+        self._pointer_feedback_timer.setSingleShot(True)
+        self._pointer_feedback_timer.setInterval(_POINTER_FEEDBACK_INTERVAL_MS)
+        self._pointer_feedback_timer.timeout.connect(self._flush_pointer_feedback)
+        self._tooltip_timer = QTimer(self)
+        self._tooltip_timer.setSingleShot(True)
+        self._tooltip_timer.setInterval(_TOOLTIP_INTERVAL_MS)
+        self._tooltip_timer.timeout.connect(self._flush_port_tooltip)
 
     def setScene(self, scene: QGraphicsScene | None) -> None:
         """Attach *scene* and repaint crosshair when selection changes (deselect included).
@@ -243,11 +110,10 @@ class DiagramView(QGraphicsView):
             )
 
     def _on_scene_selection_changed(self) -> None:
-        """Full viewport repaint after selection changes clears dashed outline (incl. deselect)."""
-
+        """Refresh crosshair overlay after selection changes (scene chrome is separate)."""
         if self._crosshair_mode == CrosshairMode.NONE:
             return
-        self._repaint_crosshair_viewport()
+        self._crosshair_overlay.update()
 
     def _clear_shift_rubber_merge(self) -> None:
         self._shift_rubber_merge_active = False
@@ -354,130 +220,24 @@ class DiagramView(QGraphicsView):
         self._wire_len_label.show()
         self._wire_len_label.raise_()
 
+    def _mouse_viewport_pos(self, event: QMouseEvent) -> QPoint:
+        """Map a view-space mouse position to viewport pixel coordinates."""
+        return self.viewport().mapFrom(self, event.pos())
+
+    def _viewport_pos_to_scene(self, viewport_pos: QPoint) -> QPointF:
+        """Convert viewport pixel coordinates to scene coordinates."""
+        return self.mapToScene(self.viewport().mapTo(self, viewport_pos))
+
     def _update_cursor_dxf_status(self, viewport_pos: QPoint) -> None:
-        self._last_scene_pos = self.mapToScene(viewport_pos)
+        self._last_scene_pos = self._viewport_pos_to_scene(viewport_pos)
         xd, yd = dxf_from_scene_pos(self._last_scene_pos)
         self.cursor_dxf_mm_changed.emit((xd, yd))
 
-    def _repaint_crosshair_viewport(self, dirty: QRect | None = None) -> None:
-        """Invalidate viewport paint (scene + :meth:`drawForeground`); *dirty* limits work when set."""
-
-        vp = self.viewport()
-        if dirty is not None and dirty.isValid() and not dirty.isEmpty():
-            vp.update(dirty)
-        else:
-            vp.update()
-
-    def _crosshair_viewport_damage_union(self, prev: QPoint | None, cur: QPoint | None) -> QRect:
-        """Union of viewport rects that must repaint (scene + crosshair) for one move.
-
-        Args:
-            prev: Prior cursor position in viewport pixels, or ``None``.
-            cur: New cursor position in viewport pixels, or ``None``.
-
-        Returns:
-            Dirty rectangle intersected with the viewport, or empty when not applicable.
-        """
-
-        vr = self.viewport().rect()
-        mode = self._crosshair_mode
-        if mode == CrosshairMode.NONE:
-            return QRect()
-        local_h = self._crosshair_local_half_px
-        side = self._crosshair_center_box_side_px
-        rects: list[QRect] = []
-        if prev is not None:
-            rects.append(
-                _crosshair_paint_bounds(
-                    mode, int(prev.x()), int(prev.y()), vr, local_h, side
-                )
-            )
-        if cur is not None:
-            rects.append(
-                _crosshair_paint_bounds(
-                    mode, int(cur.x()), int(cur.y()), vr, local_h, side
-                )
-            )
-        if not rects:
-            return QRect()
-        out = rects[0]
-        for r in rects[1:]:
-            out = out.united(r)
-        return out.intersected(vr)
-
     def _sync_crosshair_viewport_pos(self, viewport_pos: QPoint) -> None:
-        """Store the cursor position and repaint crosshair via :meth:`drawForeground`.
-
-        Uses a small dirty union when possible. While the scene has a mouse grab (e.g. moving a
-        symbol), repaints the whole viewport so the selection chrome (blue dashed outline) is not
-        left behind under ``SmartViewportUpdate``.
-
-        Args:
-            viewport_pos: Cursor position in viewport coordinates.
-
-        Returns:
-            None
-        """
-
-        if self._crosshair_mode == CrosshairMode.NONE:
-            self._crosshair_viewport_pos = viewport_pos
-            self._update_crosshair_viewport_cursor()
-            return
-        if self._pan_anchor is not None:
-            self._crosshair_viewport_pos = viewport_pos
-            self._update_crosshair_viewport_cursor()
-            return
-
-        prev = self._crosshair_viewport_pos
+        """Store cursor position and update the viewport overlay (no scene repaint)."""
         self._crosshair_viewport_pos = viewport_pos
-        sc = self.scene()
-        if sc is not None and sc.mouseGrabberItem() is not None:
-            self._repaint_crosshair_viewport()
-        else:
-            dirty = self._crosshair_viewport_damage_union(prev, viewport_pos)
-            if dirty.isValid() and not dirty.isEmpty():
-                self._repaint_crosshair_viewport(dirty)
-            else:
-                self._repaint_crosshair_viewport()
+        self._crosshair_overlay.sync_cursor_viewport_pos(viewport_pos)
         self._update_crosshair_viewport_cursor()
-
-    def drawForeground(self, painter: QPainter, rect: QRectF) -> None:
-        """Paint the crosshair after the scene; uses scene coordinates matching the view transform.
-
-        Args:
-            painter: Painter provided by ``QGraphicsView`` (scene space).
-            rect: Exposed rectangle in scene coordinates.
-
-        Returns:
-            None
-        """
-
-        super().drawForeground(painter, rect)
-        if self._crosshair_mode == CrosshairMode.NONE:
-            return
-        if self._pan_anchor is not None:
-            return
-        if self._crosshair_viewport_pos is None:
-            return
-        vr = self.viewport().rect()
-        ix = int(self._crosshair_viewport_pos.x())
-        iy = int(self._crosshair_viewport_pos.y())
-        side = self._crosshair_center_box_side_px
-        painter.save()
-        try:
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-            pen = QPen(QColor(180, 180, 190, 210))
-            pen.setWidth(1)
-            pen.setCosmetic(True)
-            painter.setPen(pen)
-            if self._crosshair_mode == CrosshairMode.FULL:
-                _paint_crosshair_full_scene_mapped(self, painter, ix, iy, vr, side)
-            elif self._crosshair_mode == CrosshairMode.LOCAL:
-                h = max(1, self._crosshair_local_half_px)
-                _paint_crosshair_local_scene_mapped(self, painter, ix, iy, h, side)
-            _paint_crosshair_center_box_scene(self, painter, ix, iy, side)
-        finally:
-            painter.restore()
 
     def _update_crosshair_viewport_cursor(self) -> None:
         """Use a blank viewport cursor while the crosshair is shown; restore during middle-button pan.
@@ -506,7 +266,7 @@ class DiagramView(QGraphicsView):
         if self._last_scene_pos is not None:
             return dxf_from_scene_pos(self._last_scene_pos)
         vc = self.viewport().rect().center()
-        return dxf_from_scene_pos(self.mapToScene(vc))
+        return dxf_from_scene_pos(self._viewport_pos_to_scene(vc))
 
     def set_escape_clear_wire_tools_callback(self, cb: Callable[[], None] | None) -> None:
         """When Esc and scene.escape_clears_wiring_tools(), call this (e.g. uncheck wire tool buttons)."""
@@ -529,8 +289,45 @@ class DiagramView(QGraphicsView):
         self._crosshair_mode = settings.crosshair_mode
         self._crosshair_local_half_px = settings.crosshair_local_half_extent_px
         self._crosshair_center_box_side_px = settings.crosshair_center_box_side_px
-        self._repaint_crosshair_viewport()
+        self._refresh_crosshair_overlay(restyle=True)
+
+    def _refresh_crosshair_overlay(self, *, restyle: bool) -> None:
+        """Sync overlay geometry and visibility after layout or settings change.
+
+        Startup calls :meth:`apply_user_settings` before the view is in the window hierarchy;
+        :meth:`showEvent` calls this again so the overlay is sized and stacked correctly.
+
+        Args:
+            restyle: When True, push mode/size into :class:`CrosshairOverlay` (settings change).
+
+        Returns:
+            None
+        """
+
+        if restyle:
+            self._crosshair_overlay.set_crosshair_style(
+                self._crosshair_mode,
+                self._crosshair_local_half_px,
+                self._crosshair_center_box_side_px,
+            )
+        vp = self.viewport()
+        top_left = vp.mapTo(self, QPoint(0, 0))
+        self._crosshair_overlay.setGeometry(QRect(top_left, vp.size()))
+        if self._crosshair_mode != CrosshairMode.NONE:
+            self._crosshair_overlay.show()
+            self._crosshair_overlay.raise_()
+            if self._crosshair_viewport_pos is None:
+                self._crosshair_viewport_pos = vp.rect().center()
+                self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
+        self._wire_len_label.raise_()
+        if self._crosshair_viewport_pos is not None:
+            self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
         self._update_crosshair_viewport_cursor()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        """Re-apply crosshair overlay once the view is shown (geometry was wrong at early init)."""
+        super().showEvent(event)
+        self._refresh_crosshair_overlay(restyle=True)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         """Realign children and refresh crosshair after the view resizes.
@@ -543,8 +340,7 @@ class DiagramView(QGraphicsView):
         """
 
         super().resizeEvent(event)
-        if self._crosshair_mode != CrosshairMode.NONE and self._crosshair_viewport_pos is not None:
-            self._repaint_crosshair_viewport()
+        self._refresh_crosshair_overlay(restyle=False)
 
     def fit_a4_page(self) -> None:
         """Reset transform and fit roughly one A4 sheet (mm) in scene coordinates.
@@ -555,7 +351,8 @@ class DiagramView(QGraphicsView):
 
         self.setTransform(QTransform())
         self.fitInView(default_a4_fit_rect_mm(), Qt.AspectRatioMode.KeepAspectRatio)
-        self._repaint_crosshair_viewport()
+        if self._crosshair_viewport_pos is not None:
+            self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
 
     def fit_scene_extent_or_default_sheet(self) -> None:
         """Reset transform and fit diagram content with an A4 landscape minimum frame.
@@ -576,7 +373,8 @@ class DiagramView(QGraphicsView):
             else default_a4_fit_rect_mm()
         )
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
-        self._repaint_crosshair_viewport()
+        if self._crosshair_viewport_pos is not None:
+            self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
@@ -606,7 +404,54 @@ class DiagramView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.scale(factor, factor)
         self.setTransformationAnchor(anchor)
-        self._repaint_crosshair_viewport()
+        if self._crosshair_viewport_pos is not None:
+            self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
+
+    def _pointer_feedback_needs_immediate(self) -> bool:
+        if self._pan_anchor is not None:
+            return True
+        sc = self.scene()
+        if sc is not None and sc.mouseGrabberItem() is not None:
+            return True
+        if isinstance(sc, DiagramScene) and sc.pointer_feedback_needs_immediate_update():
+            return True
+        return False
+
+    def _schedule_pointer_feedback(self, viewport_pos: QPoint) -> None:
+        self._pending_viewport_pos = viewport_pos
+        if self._pointer_feedback_needs_immediate():
+            self._flush_pointer_feedback()
+            return
+        if not self._pointer_feedback_timer.isActive():
+            self._pointer_feedback_timer.start()
+
+    def _flush_pointer_feedback(self) -> None:
+        pos = self._pending_viewport_pos
+        if pos is None:
+            return
+        self._update_cursor_dxf_status(pos)
+        sc = self.scene()
+        if isinstance(sc, DiagramScene):
+            sc.update_pointer_feedback(self._viewport_pos_to_scene(pos))
+        self._update_length_hud(pos)
+
+    def _schedule_port_tooltip(self, viewport_pos: QPoint) -> None:
+        self._pending_viewport_pos = viewport_pos
+        if not self._tooltip_timer.isActive():
+            self._tooltip_timer.start()
+
+    def _flush_port_tooltip(self) -> None:
+        pos = self._pending_viewport_pos
+        if pos is None:
+            return
+        sc = self.scene()
+        if sc is None or not hasattr(sc, "hover_port_hint"):
+            return
+        hint = sc.hover_port_hint(self._viewport_pos_to_scene(pos))
+        if hint == self._last_tool_tip:
+            return
+        self._last_tool_tip = hint
+        self.setToolTip(hint)
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         sc = self.scene()
@@ -632,7 +477,7 @@ class DiagramView(QGraphicsView):
         if event.button() == Qt.MouseButton.MiddleButton:
             self._pan_anchor = event.pos()
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
-            self._repaint_crosshair_viewport()
+            self._crosshair_overlay.set_pan_active(True)
             self._update_crosshair_viewport_cursor()
             event.accept()
             return
@@ -665,13 +510,26 @@ class DiagramView(QGraphicsView):
             return
         super().mousePressEvent(event)
 
+    def enterEvent(self, event: QEnterEvent) -> None:
+        """Track cursor when the pointer enters so crosshair appears without waiting for move."""
+        super().enterEvent(event)
+        vp = self.viewport()
+        pos = vp.mapFromGlobal(QCursor.pos())
+        if vp.rect().contains(pos):
+            self._pending_viewport_pos = pos
+            self._sync_crosshair_viewport_pos(pos)
+
     def leaveEvent(self, event) -> None:
         self._wire_len_label.hide()
+        self._pointer_feedback_timer.stop()
+        self._tooltip_timer.stop()
+        self._pending_viewport_pos = None
         prev = self._crosshair_viewport_pos
         self._crosshair_viewport_pos = None
+        self._crosshair_overlay.sync_cursor_viewport_pos(None)
         if self._crosshair_mode != CrosshairMode.NONE and prev is not None:
             vr = self.viewport().rect()
-            b = _crosshair_paint_bounds(
+            b = crosshair_paint_bounds(
                 self._crosshair_mode,
                 int(prev.x()),
                 int(prev.y()),
@@ -679,20 +537,27 @@ class DiagramView(QGraphicsView):
                 self._crosshair_local_half_px,
                 self._crosshair_center_box_side_px,
             )
-            self._repaint_crosshair_viewport(b)
+            if b.isValid() and not b.isEmpty():
+                self._crosshair_overlay.update(b)
         self._update_crosshair_viewport_cursor()
+        self._last_tool_tip = ""
+        self.setToolTip("")
         self.cursor_dxf_mm_changed.emit(None)
         self._clear_shift_rubber_merge()
         super().leaveEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        vp_pos = (
+            self._mouse_viewport_pos(event) if isinstance(event, QMouseEvent) else event.pos()
+        )
         if self._pan_anchor is not None:
             self._wire_len_label.hide()
             delta = event.pos() - self._pan_anchor
             self._pan_anchor = event.pos()
             apply_wheel_pan_scroll_delta(self, delta)
-            self._update_cursor_dxf_status(event.pos())
-            self._sync_crosshair_viewport_pos(event.pos())
+            self._pending_viewport_pos = vp_pos
+            self._update_cursor_dxf_status(vp_pos)
+            self._sync_crosshair_viewport_pos(vp_pos)
             event.accept()
             return
         if isinstance(event, QMouseEvent):
@@ -703,20 +568,19 @@ class DiagramView(QGraphicsView):
                 self._reapply_shift_rubber_saved_selection()
         else:
             super().mouseMoveEvent(event)
-        self._update_cursor_dxf_status(event.pos())
-        sc = self.scene()
-        if sc is not None and hasattr(sc, "hover_port_hint"):
-            h = sc.hover_port_hint(self.mapToScene(event.pos()))
-            self.setToolTip(h)
-        self._update_length_hud(event.pos())
-        self._sync_crosshair_viewport_pos(event.pos())
+        self._pending_viewport_pos = vp_pos
+        self._schedule_pointer_feedback(vp_pos)
+        self._schedule_port_tooltip(vp_pos)
+        self._sync_crosshair_viewport_pos(vp_pos)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
             self._pan_anchor = None
             self.unsetCursor()
+            self._crosshair_overlay.set_pan_active(False)
             self._update_crosshair_viewport_cursor()
-            self._repaint_crosshair_viewport()
+            if self._crosshair_viewport_pos is not None:
+                self._crosshair_overlay.sync_cursor_viewport_pos(self._crosshair_viewport_pos)
             event.accept()
             return
         if isinstance(event, QMouseEvent):

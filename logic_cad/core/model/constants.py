@@ -20,6 +20,9 @@ GATE_STATIC_LABEL_OR = "O"
 GATE_STATIC_TEXT_HEIGHT_AND_MM = 2.5
 GATE_STATIC_TEXT_HEIGHT_OR_MM = 2.5
 
+# DXF TEXTSTYLE for Japanese-capable fonts (BricsCAD / host CAD); entities use ``dxf.style``.
+TEXT_STYLE_LOGIC_CAD_FONT = "LOGIC_CAD_FONT"
+
 # First page name
 FIRST_PAGE_NAME = "01"
 
@@ -85,7 +88,7 @@ PEER_UID_XDATA = "peer_uid"
 
 # Footnote-style in-page link markers (※1, ※2, …)
 ENTITY_TYPE_INPAGE_REF = "INPAGE_REF"
-INPAGE_MARKER_PREFIX = "※"
+INPAGE_MARKER_PREFIX = "*"
 INPAGE_SYM_HEIGHT_MM = 2.5
 # LD_APP XDATA: optional per-INSERT SYM text height (mm); string for build_ld_app_tags
 INPAGE_SYM_HEIGHT_XDATA = "sym_height_mm"

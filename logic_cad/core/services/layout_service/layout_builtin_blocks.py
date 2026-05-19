@@ -7,6 +7,7 @@ import math
 from ezdxf.document import Drawing
 
 from logic_cad.core.dxf.attrib_geometry_sync import sync_insert_attrib_geometry_from_attdefs
+from logic_cad.core.dxf.text_style import merge_logic_cad_text_style_attrib
 from logic_cad.core.model.constants import (
     BLOCK_CHECKPOINT,
     BLOCK_INPAGE_FROM,
@@ -43,7 +44,7 @@ def _add_page_sym_attdef(blk: object, w: float, h: float) -> None:
         text="101A",
         insert=(w * 0.12, h * 0.22),
         height=0.34,
-        dxfattribs={"layer": LAYER_TEXT},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
     )
 
 
@@ -84,7 +85,7 @@ def _add_page_link_page_name_desc_attdefs(blk: object, w: float, h: float) -> No
             text="",
             insert=insert_xy,
             height=height,
-            dxfattribs={"layer": LAYER_TEXT, "halign": halign, "invisible": 1},
+            dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT, "halign": halign, "invisible": 1}),
         )
 
 
@@ -193,10 +194,10 @@ def _add_builtin_inpage_from(blk: object) -> None:
     ty = float(INPAGE_SYM_INSERT_DY_MM)
     blk.add_attdef(
         tag="SYM",
-        text="※1",
+        text="*1",
         insert=(tx, ty),
         height=float(INPAGE_SYM_HEIGHT_MM),
-        dxfattribs={"layer": LAYER_TEXT, "halign": 0},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT, "halign": 0}),
     )
 
 
@@ -208,10 +209,10 @@ def _add_builtin_inpage_to(blk: object) -> None:
     ty = float(INPAGE_SYM_INSERT_DY_MM)
     blk.add_attdef(
         tag="SYM",
-        text="※1",
+        text="*1",
         insert=(tx, ty),
         height=float(INPAGE_SYM_HEIGHT_MM),
-        dxfattribs={"layer": LAYER_TEXT, "halign": 2},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT, "halign": 2}),
     )
 
 
@@ -237,7 +238,7 @@ def ensure_checkpoint_block(doc: Drawing) -> None:
         text="CP_1",
         insert=(0.25, 0.35),
         height=0.28,
-        dxfattribs={"layer": LAYER_TEXT},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
     )
 
 
@@ -257,5 +258,5 @@ def ensure_wire_branch_block(doc: Drawing) -> None:
         text="BR_1",
         insert=(0.35, 0.55),
         height=0.22,
-        dxfattribs={"layer": LAYER_TEXT},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
     )

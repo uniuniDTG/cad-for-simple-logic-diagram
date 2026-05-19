@@ -1,4 +1,4 @@
-"""INPAGE_REF pairing and ※n labels on one layout."""
+"""INPAGE_REF pairing and *n labels on one layout."""
 
 from logic_cad.core.dxf.dxf_repository import new_document
 from logic_cad.core.model.constants import (
@@ -27,8 +27,8 @@ def _sym(uid: str, ss: SymbolService, layout: str) -> str:
 
 
 def test_inpage_ref_label_helper() -> None:
-    assert inpage_ref_label(1) == "※1"
-    assert inpage_ref_label(12) == "※12"
+    assert inpage_ref_label(1) == "*1"
+    assert inpage_ref_label(12) == "*12"
 
 
 def test_pair_shares_sym_and_peer_xdata() -> None:
@@ -39,8 +39,8 @@ def test_pair_shares_sym_and_peer_xdata() -> None:
     u_from = ss.place_inpage_ref(layout, (10.0, 20.0), outgoing=True, peer_uid="")
     u_to = ss.place_inpage_ref(layout, (40.0, 22.0), outgoing=False, peer_uid=u_from)
     ss.link_inpage_ref_pair(layout, u_from, u_to)
-    assert _sym(u_from, ss, layout) == "※1"
-    assert _sym(u_to, ss, layout) == "※1"
+    assert _sym(u_from, ss, layout) == "*1"
+    assert _sym(u_to, ss, layout) == "*1"
     ins_f = ss.insert_by_uid(layout, u_from)
     ins_t = ss.insert_by_uid(layout, u_to)
     assert ins_f is not None and ins_t is not None
@@ -82,10 +82,10 @@ def test_two_pairs_renumbered() -> None:
     b1 = ss.place_inpage_ref(layout, (25.0, 30.0), outgoing=False, peer_uid=a1)
     ss.link_inpage_ref_pair(layout, a1, b1)
     # Sort key uses ``-insert.y`` ascending (same as PAGE_REF): larger y → smaller −y → listed first.
-    assert _sym(a0, ss, layout) == "※1"
-    assert _sym(b0, ss, layout) == "※1"
-    assert _sym(a1, ss, layout) == "※2"
-    assert _sym(b1, ss, layout) == "※2"
+    assert _sym(a0, ss, layout) == "*1"
+    assert _sym(b0, ss, layout) == "*1"
+    assert _sym(a1, ss, layout) == "*2"
+    assert _sym(b1, ss, layout) == "*2"
 
 
 def test_delete_by_uid_removes_partner() -> None:
@@ -130,6 +130,10 @@ def test_duplicate_page_remaps_peer_uid() -> None:
 
 
 def test_manual_link_label_survives_refresh() -> None:
+    """Manual ``sym`` survives ``refresh_inpage_ref_syms_on_layout``.
+
+    Palette D&D manual mode commits via the same ``set_inpage_ref_link_display`` API after pairing.
+    """
     doc = new_document()
     layout = [L.name for L in doc.layouts if not L.is_modelspace][0]
     ss = SymbolService(doc, DynamicGateFactory())
@@ -146,7 +150,7 @@ def test_manual_link_label_survives_refresh() -> None:
 
 
 def test_mixed_manual_auto_ordinals_skip_gaps() -> None:
-    """Manual pair first in sort order: auto pair still gets ※1 (policy A)."""
+    """Manual pair first in sort order: auto pair still gets *1 (policy A)."""
     doc = new_document()
     layout = [L.name for L in doc.layouts if not L.is_modelspace][0]
     ss = SymbolService(doc, DynamicGateFactory())
@@ -159,8 +163,8 @@ def test_mixed_manual_auto_ordinals_skip_gaps() -> None:
     ss.set_inpage_ref_link_display(layout, a0, link_name_auto=False, display_text="M")
     assert _sym(a0, ss, layout) == "M"
     assert _sym(b0, ss, layout) == "M"
-    assert _sym(a1, ss, layout) == "※1"
-    assert _sym(b1, ss, layout) == "※1"
+    assert _sym(a1, ss, layout) == "*1"
+    assert _sym(b1, ss, layout) == "*1"
 
 
 def test_revert_manual_to_auto_renumbers() -> None:
@@ -172,5 +176,5 @@ def test_revert_manual_to_auto_renumbers() -> None:
     ss.link_inpage_ref_pair(layout, u_from, u_to)
     ss.set_inpage_ref_link_display(layout, u_from, link_name_auto=False, display_text="Z")
     ss.set_inpage_ref_link_display(layout, u_from, link_name_auto=True, display_text="")
-    assert _sym(u_from, ss, layout) == "※1"
-    assert _sym(u_to, ss, layout) == "※1"
+    assert _sym(u_from, ss, layout) == "*1"
+    assert _sym(u_to, ss, layout) == "*1"

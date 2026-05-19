@@ -10,6 +10,7 @@ from ezdxf.enums import TextEntityAlignment
 from ezdxf.fonts import fonts
 from ezdxf.lldxf.validator import make_table_key
 from PySide6.QtCore import QPointF
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 
 from logic_cad.core.text.layout_resolver import (
@@ -22,7 +23,16 @@ from logic_cad.core.text.layout_resolver import (
     preferred_ui_font_family,
     ui_font_family_chain,
 )
-from logic_cad.ui.block_paint import mtext_path_bounds_item_local, text_path_bounds_item_local
+from logic_cad.core.text.pdf_like_font_faces import (
+    build_pdf_like_font_face_table,
+    get_pdf_like_font_face_table,
+    invalidate_pdf_like_font_face_cache,
+)
+from logic_cad.ui.block_paint import (
+    _qfont_from_font_face,
+    mtext_path_bounds_item_local,
+    text_path_bounds_item_local,
+)
 
 
 def _new_doc() -> ezdxf.document.Drawing:
@@ -375,3 +385,52 @@ def test_mtext_wrap_respects_width_limit() -> None:
     )
     assert r is not None
     assert r.width() <= 24.6
+
+
+def test_pdf_like_font_table_matches_render_context_apply() -> None:
+    """Cached table builder must match PDF RenderContext.fonts after apply."""
+
+    doc = _new_doc()
+    table = build_pdf_like_font_face_table(doc)
+    ctx = RenderContext(doc)
+    apply_render_context_fonts_for_pdf_like_ui(ctx, doc)
+    assert table.keys() == ctx.fonts.keys()
+    for key in table:
+        assert table[key] is ctx.fonts[key]
+
+
+def test_get_pdf_like_font_face_table_uses_cache_until_invalidated() -> None:
+    """Document cache should return the same mapping until invalidate."""
+
+    doc = _new_doc()
+    first = get_pdf_like_font_face_table(doc)
+    second = get_pdf_like_font_face_table(doc)
+    assert first is second
+    invalidate_pdf_like_font_face_cache(doc=doc)
+    third = get_pdf_like_font_face_table(doc)
+    assert third is not first
+
+
+def test_normalize_dxf_text_entity_sets_outline_font_face() -> None:
+    """Normalized layout should carry PDF-aligned outline font face for Qt."""
+
+    doc = _new_doc()
+    msp = doc.modelspace()
+    ent = msp.add_text("abc", height=2.5, dxfattribs={"style": "Standard", "insert": (0.0, 0.0)})
+    layout = normalize_dxf_text_entity(ent)
+    table = get_pdf_like_font_face_table(doc)
+    std_key = make_table_key("Standard")
+    assert layout.outline_font_face is table.get(std_key)
+
+
+def test_qfont_from_font_face_uses_prefer_no_font_merging() -> None:
+    """Qt path text should opt out of font merging when building QFont."""
+
+    _ensure_qt_app()
+    font = _qfont_from_font_face(None, font_family="Arial")
+    no_merge = getattr(
+        QFont.StyleStrategy,
+        "PreferNoFontMerging",
+        QFont.StyleStrategy.NoFontMerging,
+    )
+    assert font.styleStrategy() & no_merge

@@ -182,13 +182,21 @@ def _symbol_boxes(
             if nb is not None:
                 boxes.append(nb)
             else:
-                try:
-                    e = dxf_bbox.extents([ins])
-                    if e is not None and getattr(e, "has_data", False):
-                        emin, emax = e.extmin, e.extmax
-                        boxes.append((float(emin.x), float(emin.y), float(emax.x), float(emax.y)))
-                except Exception:
-                    pass
+                # POINT-only blocks (INPAGE_FROM, checkpoints) yield nb=None; extents([INSERT]) can
+                # mis-report WCS and drag the hull toward origin—prefer exploded block extents first.
+                vb = _virtual_block_world_bbox(ins)
+                if vb is not None:
+                    boxes.append(vb)
+                else:
+                    try:
+                        e = dxf_bbox.extents([ins])
+                        if e is not None and getattr(e, "has_data", False):
+                            emin, emax = e.extmin, e.extmax
+                            boxes.append(
+                                (float(emin.x), float(emin.y), float(emax.x), float(emax.y))
+                            )
+                    except Exception:
+                        pass
     if not boxes and ins is not None:
         ix = float(ins.dxf.insert.x)
         iy = float(ins.dxf.insert.y)

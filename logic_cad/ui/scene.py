@@ -78,6 +78,7 @@ from logic_cad.core.text.layout_resolver import normalize_dxf_text_entity
 from logic_cad.ui.dialogs.user_text_place_dialog import prompt_dxf_text_string_and_height
 from logic_cad.ui.bulge_path import append_bulge_arc_to_path
 from logic_cad.ui.scene_item.z_order import CANVAS_Z_FRAME_VPORT_PREVIEW
+from logic_cad.ui.scene_item.hits import DEFAULT_SCENE_HIT_TOL_MM
 from logic_cad.ui.scene_item.osnap import OsnapCandidate, pick_osnap_candidate
 from logic_cad.ui.dxf_display_color import entity_effective_linetype, entity_stroke_qcolor
 from logic_cad.ui.items.mtext_item import DxfMTextItem
@@ -104,6 +105,9 @@ from logic_cad.ui.view_fit_rect import DEFAULT_DIAGRAM_VIEW_FIT_MARGIN_MM, defau
 
 if TYPE_CHECKING:
     from logic_cad.core.logic_diagram import LogicDiagram
+
+# Re-pick OSNAP only after this much cursor travel (mm, DXF) in non-wire mode.
+_OSANAP_CURSOR_SKIP_MM: float = min(1.0, DEFAULT_SCENE_HIT_TOL_MM * 0.35)
 
 
 ENV_SHOW_ROUTING_BBOX = "LOGIC_CAD_SHOW_ROUTING_BBOX"
@@ -183,6 +187,14 @@ class DiagramScene(QGraphicsScene):
         self._show_routing_bbox = _env_truthy(ENV_SHOW_ROUTING_BBOX)
         self._show_connect_bbox = _env_truthy(ENV_SHOW_CONNECT_BBOX)
         self._connect_bbox_hover_port: tuple[str, str] | None = None
+        self._wire_hover_item: WireItem | None = None
+        self._wire_hover_seg: int | None = None
+        self._osnap_last_key: tuple[object, ...] | None = None
+        self._osnap_last_pick_scene_pos: QPointF | None = None
+        self._hover_hint_last_uid: str | None = None
+        self._routing_bbox_obstacles_cache: list[tuple[float, float, float, float]] | None = None
+        self._connect_obstacles_cache_key: tuple[tuple[str, tuple[str, ...]], ...] | None = None
+        self._connect_obstacles_cache: list[tuple[float, float, float, float]] = []
         self.setSceneRect(-500, -500, 2000, 2000)
         self.rebuild()
 
@@ -226,12 +238,25 @@ class DiagramScene(QGraphicsScene):
 
     def hover_port_hint(self, scene_pos: QPointF) -> str:
         """ステータス／ツールチップ用: ポート上ならレイヤ名とキー。"""
-        for _uid, sym in self._symbol_items.items():
+        last_uid = self._hover_hint_last_uid
+        if last_uid is not None:
+            sym = self._symbol_items.get(last_uid)
+            if sym is not None:
+                pk = sym.port_at_scene_pos(scene_pos)
+                if pk:
+                    layer = f"LD_PORT_{pk}"
+                    bdef = sym.definition_block_name or ""
+                    return (
+                        f"{layer}   port={pk!r}   block={bdef!r}   uid={sym.symbol_uid}"
+                    )
+        for uid, sym in self._symbol_items.items():
             pk = sym.port_at_scene_pos(scene_pos)
             if pk:
+                self._hover_hint_last_uid = uid
                 layer = f"LD_PORT_{pk}"
                 bdef = sym.definition_block_name or ""
                 return f"{layer}   port={pk!r}   block={bdef!r}   uid={sym.symbol_uid}"
+        self._hover_hint_last_uid = None
         return ""
 
     def set_diagram(self, diagram: LogicDiagram) -> None:
@@ -486,20 +511,44 @@ class DiagramScene(QGraphicsScene):
         self.select_symbol_uids(selected_uids)
 
     def _clear_wire_hover_segments(self) -> None:
-        for it in self.items():
-            if isinstance(it, WireItem):
-                it.set_hover_segment(None)
+        """Clear tracked wire segment hover without scanning all scene items."""
+        if self._wire_hover_item is None:
+            return
+        item = self._wire_hover_item
+        self._wire_hover_item = None
+        self._wire_hover_seg = None
+        item.set_hover_segment(None)
 
     def _update_wire_segment_hover(self, scene_pos: QPointF) -> None:
-        self._clear_wire_hover_segments()
         if self._wire_mode or self._wire_seg_drag is not None or self._user_line_endpoint_drag is not None:
+            self._clear_wire_hover_segments()
             return
         sels = self.selectedItems()
         if len(sels) != 1 or not isinstance(sels[0], WireItem):
+            self._clear_wire_hover_segments()
             return
         wi = sels[0]
         seg = wi.hit_eligible_parallel_segment(scene_pos)
+        if wi is self._wire_hover_item and seg == self._wire_hover_seg:
+            return
+        if self._wire_hover_item is not None and self._wire_hover_item is not wi:
+            self._clear_wire_hover_segments()
+        self._wire_hover_item = wi
+        self._wire_hover_seg = seg
         wi.set_hover_segment(seg)
+
+    @staticmethod
+    def _osnap_candidate_key(cand: OsnapCandidate | None) -> tuple[object, ...] | None:
+        """Hashable identity for the current OSNAP candidate (for diff updates)."""
+        if cand is None:
+            return None
+        return (
+            cand.kind,
+            round(float(cand.dxf_pos[0]), 4),
+            round(float(cand.dxf_pos[1]), 4),
+            cand.symbol_uid,
+            cand.port_key,
+        )
 
     def _set_osnap_marker(self, scene_pos: QPointF) -> None:
         if self._osnap_marker is None:
@@ -510,18 +559,25 @@ class DiagramScene(QGraphicsScene):
             self._osnap_marker = marker
             self.addItem(marker)
         radius = 1.3
-        self._osnap_marker.setRect(
+        new_rect = QRectF(
             scene_pos.x() - radius,
             scene_pos.y() - radius,
             radius * 2.0,
             radius * 2.0,
         )
+        if self._osnap_marker.rect() == new_rect:
+            return
+        self._osnap_marker.setRect(new_rect)
 
     def _clear_osnap_marker(self) -> None:
         if self._osnap_marker is None:
+            self._osnap_last_key = None
+            self._osnap_last_pick_scene_pos = None
             return
         self.removeItem(self._osnap_marker)
         self._osnap_marker = None
+        self._osnap_last_key = None
+        self._osnap_last_pick_scene_pos = None
 
     def _pick_wire_port_osnap(self, scene_pos: QPointF) -> OsnapCandidate | None:
         return pick_osnap_candidate(
@@ -553,6 +609,17 @@ class DiagramScene(QGraphicsScene):
         if self._wire_seg_drag is not None or self._user_line_endpoint_drag is not None:
             self._clear_osnap_marker()
             return
+        if (
+            not self._wire_mode
+            and self._osnap_last_key is not None
+            and self._osnap_last_pick_scene_pos is not None
+        ):
+            last_dxf = dxf_from_scene_pos(self._osnap_last_pick_scene_pos)
+            cur_dxf = dxf_from_scene_pos(scene_pos)
+            dx = float(cur_dxf[0]) - float(last_dxf[0])
+            dy = float(cur_dxf[1]) - float(last_dxf[1])
+            if dx * dx + dy * dy < _OSANAP_CURSOR_SKIP_MM * _OSANAP_CURSOR_SKIP_MM:
+                return
         cand = None
         if self._wire_mode:
             cand = self._pick_wire_port_osnap(scene_pos)
@@ -564,6 +631,11 @@ class DiagramScene(QGraphicsScene):
                 include_user_line_endpoints=True,
                 include_wire_ports=False,
             )
+        self._osnap_last_pick_scene_pos = QPointF(scene_pos)
+        key = self._osnap_candidate_key(cand)
+        if key == self._osnap_last_key:
+            return
+        self._osnap_last_key = key
         if cand is None:
             self._clear_osnap_marker()
             return
@@ -600,6 +672,72 @@ class DiagramScene(QGraphicsScene):
             return
         uid, raw_pk, _sym = hit
         self._set_connect_bbox_hover_port((uid, self._normalize_wire_endpoint_port_key(uid, raw_pk)))
+
+    def _connect_bbox_access_ports_cache_key(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
+        """Stable cache key for connect-bbox obstacle rebuild (wire start + hover port)."""
+        if self._wire_start is None:
+            return ()
+        uid0, pk0 = self._wire_start
+        ports: dict[str, set[str]] = {uid0: {pk0}}
+        if self._connect_bbox_hover_port is not None:
+            hu, hp = self._connect_bbox_hover_port
+            ports.setdefault(hu, set()).add(hp)
+        return tuple(sorted((u, tuple(sorted(ps))) for u, ps in ports.items()))
+
+    def _connect_bbox_obstacles_cached(self) -> list[tuple[float, float, float, float]]:
+        """Return connect-bbox routing obstacles, rebuilding only when access ports change."""
+        key = self._connect_bbox_access_ports_cache_key()
+        if key == self._connect_obstacles_cache_key:
+            return self._connect_obstacles_cache
+        access_ports: dict[str, set[str]] = {}
+        for uid, pks in key:
+            access_ports[uid] = set(pks)
+        try:
+            built = build_routing_obstacles(
+                self._diagram.doc,
+                self._diagram.index,
+                self._diagram.current_layout_name,
+                set(),
+                access_ports=access_ports,
+            )
+        except Exception:
+            built = []
+        self._connect_obstacles_cache_key = key
+        self._connect_obstacles_cache = built
+        return built
+
+    def pointer_feedback_needs_immediate_update(self) -> bool:
+        """Whether pointer-driven HUD/hover must run on every mouse move (not coalesced)."""
+        if self._wire_seg_drag is not None or self._user_line_endpoint_drag is not None:
+            return True
+        if self._wire_rubber is not None and self._wire_anchor is not None:
+            return True
+        if (
+            self._manual_wire_mode
+            and self._wire_start is not None
+            and self._manual_preview_dash is not None
+        ):
+            return True
+        if self._sketch_tool == "line" and self._sketch_p0_dxf is not None and self._sketch_preview_line is not None:
+            return True
+        if self._sketch_tool == "circle" and self._sketch_p0_dxf is not None and self._sketch_preview_circle is not None:
+            return True
+        if (
+            self._sketch_tool == "arc"
+            and len(self._sketch_arc_dxf_pts) >= 1
+            and (self._sketch_preview_arc_chord is not None or self._sketch_preview_arc is not None)
+        ):
+            return True
+        if self._sketch_tool == "cloud" and self._sketch_cloud_vertices_dxf and self._sketch_preview_cloud is not None:
+            return True
+        return False
+
+    def update_pointer_feedback(self, scene_pos: QPointF) -> None:
+        """Update idle wire-segment hover, OSNAP marker, and connect-bbox hover (may be coalesced)."""
+        if not self._wire_mode and self._wire_seg_drag is None and self._user_line_endpoint_drag is None:
+            self._update_wire_segment_hover(scene_pos)
+        self._update_osnap_feedback(scene_pos)
+        self._update_connect_bbox_hover_port(scene_pos)
 
     def wire_preview_length_mm(self) -> float | None:
         """While auto/manual wire preview is active, length in mm; else None."""
@@ -867,16 +1005,18 @@ class DiagramScene(QGraphicsScene):
         if not self._show_routing_bbox and not self._show_connect_bbox:
             return
         base_obstacles: list[tuple[float, float, float, float]] = []
-        try:
-            if self._show_routing_bbox:
-                base_obstacles = build_routing_obstacles(
-                    self._diagram.doc,
-                    self._diagram.index,
-                    self._diagram.current_layout_name,
-                    set(),
-                )
-        except Exception:
-            base_obstacles = []
+        if self._show_routing_bbox:
+            if self._routing_bbox_obstacles_cache is None:
+                try:
+                    self._routing_bbox_obstacles_cache = build_routing_obstacles(
+                        self._diagram.doc,
+                        self._diagram.index,
+                        self._diagram.current_layout_name,
+                        set(),
+                    )
+                except Exception:
+                    self._routing_bbox_obstacles_cache = []
+            base_obstacles = self._routing_bbox_obstacles_cache
         if self._show_routing_bbox:
             self._draw_obstacle_rects(
                 painter,
@@ -887,20 +1027,7 @@ class DiagramScene(QGraphicsScene):
             )
         if not self._show_connect_bbox or not self._wire_mode or self._wire_start is None:
             return
-        access_ports: dict[str, set[str]] = {self._wire_start[0]: {self._wire_start[1]}}
-        if self._connect_bbox_hover_port is not None:
-            hu, hp = self._connect_bbox_hover_port
-            access_ports.setdefault(hu, set()).add(hp)
-        try:
-            connect_obstacles = build_routing_obstacles(
-                self._diagram.doc,
-                self._diagram.index,
-                self._diagram.current_layout_name,
-                set(),
-                access_ports=access_ports,
-            )
-        except Exception:
-            return
+        connect_obstacles = self._connect_bbox_obstacles_cached()
         self._draw_obstacle_rects(
             painter,
             rect,
@@ -912,7 +1039,12 @@ class DiagramScene(QGraphicsScene):
     def rebuild(self) -> None:
         self.cancel_user_sketch()
         self.cancel_wire_rubber()
+        self._clear_wire_hover_segments()
         self._clear_osnap_marker()
+        self._hover_hint_last_uid = None
+        self._routing_bbox_obstacles_cache = None
+        self._connect_obstacles_cache_key = None
+        self._connect_obstacles_cache = []
         self.clear()
         self._symbol_items.clear()
         self._diagram.rebuild_index()
@@ -1539,10 +1671,7 @@ class DiagramScene(QGraphicsScene):
             )
         else:
             self._sketch_line_preview_length_mm = None
-        if not self._wire_mode and self._wire_seg_drag is None and self._user_line_endpoint_drag is None:
-            self._update_wire_segment_hover(spos)
-        self._update_osnap_feedback(spos)
-        self._update_connect_bbox_hover_port(spos)
+        self.update_pointer_feedback(spos)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:
         if event.button() == Qt.MouseButton.RightButton:

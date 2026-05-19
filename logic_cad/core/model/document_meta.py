@@ -176,6 +176,14 @@ def set_project_preferred_font_family(doc: Drawing, family: str | None) -> None:
     else:
         merged.pop(PREFERRED_FONT_FAMILY_KEY, None)
     _set_document_meta_xdata(entity, merged)
+    # Keep TEXTSTYLE ``LOGIC_CAD_FONT`` font file in sync for BricsCAD (single-font TEXTSTYLE table).
+    from logic_cad.core.dxf.text_style import ensure_logic_cad_font_style
+
+    pf = str(family).strip() if family and str(family).strip() else None
+    ensure_logic_cad_font_style(doc, preferred_family=pf)
+    from logic_cad.core.text.pdf_like_font_faces import invalidate_pdf_like_font_face_cache
+
+    invalidate_pdf_like_font_face_cache(doc=doc)
 
 
 def apply_document_meta_stamp(doc: Drawing, *, dxf_profile: str = "R2010") -> None:

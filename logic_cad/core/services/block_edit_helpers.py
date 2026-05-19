@@ -21,6 +21,7 @@ from logic_cad.core.services.user_sketch_entity_factory import finalize_new_user
 from logic_cad.core.undo.history import find_entity_by_uid
 from logic_cad.core.undo.entity_serialize import restore_entity_from_payload, serialize_entity
 from logic_cad.core.dxf.dxf_repository import ensure_standard_layers, new_document
+from logic_cad.core.dxf.text_style import merge_logic_cad_text_style_attrib
 
 
 def port_point_layers_in_block(block) -> set[str]:
@@ -147,7 +148,7 @@ def add_attdef_to_block(
         text=str(default_text),
         insert=(x, y),
         height=max(0.25, float(height_mm)),
-        dxfattribs={"layer": LAYER_TEXT},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
     )
     ins = e.dxf.insert
     z = float(getattr(ins, "z", 0.0) or 0.0)
@@ -300,7 +301,7 @@ def add_plain_text_to_block(
     e = block.add_text(
         str(text),
         height=max(0.25, float(height_mm)),
-        dxfattribs={"layer": LAYER_TEXT},
+        dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
     )
     e.dxf.insert = (x, y, 0.0)
     e.dxf.align_point = (x, y, 0.0)

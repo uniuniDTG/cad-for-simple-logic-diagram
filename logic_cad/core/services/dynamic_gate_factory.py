@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from ezdxf.document import Drawing
 from ezdxf.enums import TextEntityAlignment
 
+from logic_cad.core.dxf.text_style import merge_logic_cad_text_style_attrib
 from logic_cad.core.model.constants import (
     GATE_STATIC_LABEL_AND,
     GATE_STATIC_LABEL_OR,
@@ -148,7 +149,7 @@ class DynamicGateFactory:
             text=name,
             insert=(g.xL + 0.15, g.sym_y),
             height=GATE_SYM_TEXT_HEIGHT_MM,
-            dxfattribs={"layer": LAYER_TEXT},
+            dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
         )
         _h_static = (
             GATE_STATIC_TEXT_HEIGHT_AND_MM
@@ -161,12 +162,12 @@ class DynamicGateFactory:
             text=static_label,
             insert=(_cx, g.mid_y),
             height=_h_static,
-            dxfattribs={"layer": LAYER_TEXT},
+            dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
         ).set_placement((_cx, g.mid_y), align=TextEntityAlignment.MIDDLE_CENTER)
         blk.add_attdef(
             tag="LABEL0",
             text="",
             insert=(g.xL + 0.2, g.y_sq_B + 0.2),
             height=GATE_LABEL0_TEXT_HEIGHT_MM,
-            dxfattribs={"layer": LAYER_TEXT},
+            dxfattribs=merge_logic_cad_text_style_attrib({"layer": LAYER_TEXT}),
         )

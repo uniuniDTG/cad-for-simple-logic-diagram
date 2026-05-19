@@ -10,26 +10,53 @@ import math
 from pathlib import Path
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 import ezdxf
 from ezdxf.entities import DXFEntity
 from ezdxf.fonts import fonts
 from ezdxf.lldxf.validator import make_table_key as _dxf_style_table_key
 
+from logic_cad.core.model.constants import TEXT_STYLE_LOGIC_CAD_FONT
 from logic_cad.core.model.document_meta import read_project_preferred_font_family
 
 # Ordered by practical availability on Windows/Japanese environments.
 _FONT_FAMILY_CANDIDATES: tuple[str, ...] = (
-    "MS Gothic",
+    # Latin / numeric readability first
+    "Segoe UI",
+    "Helvetica Neue",
+    "Arial",
+    "Liberation Sans",
+    "DejaVu Sans",
+    "Noto Sans",
+
+    # Japanese
     "Yu Gothic UI",
     "Yu Gothic",
     "Meiryo",
+    "Hiragino Sans",
     "Noto Sans CJK JP",
     "Noto Sans JP",
-    "IPAexGothic",
+
+    # Chinese
     "Microsoft YaHei",
+    "Microsoft JhengHei",
+    "PingFang SC",
+    "PingFang TC",
+    "Noto Sans CJK SC",
+    "Noto Sans CJK TC",
+    "WenQuanYi Micro Hei",
+
+    # Korean
+    "Malgun Gothic",
+    "Apple SD Gothic Neo",
+    "Noto Sans CJK KR",
+    "NanumGothic",
+
+    # Legacy / final
+    "MS Gothic",
     "Arial",
+    "sans-serif",
 )
 
 _FONT_FILE_STEM_ALIASES: dict[str, str] = {
@@ -70,6 +97,7 @@ class NormalizedTextLayout:
         attachment_point: MTEXT attachment point (1-9, 0 if N/A).
         font_family: Preferred UI font family.
         font_families: Ordered family chain for deterministic Qt resolution.
+        outline_font_face: PDF-aligned outline face (ezdxf ``FontFace``) for Qt path text.
     """
 
     text: str
@@ -93,6 +121,7 @@ class NormalizedTextLayout:
     attachment_point: int
     font_family: str
     font_families: tuple[str, ...]
+    outline_font_face: Any | None = None
 
 
 def font_family_candidates() -> tuple[str, ...]:
@@ -116,6 +145,8 @@ def preferred_ui_font_family(style_name: str | None = None) -> str:
     """
 
     s = str(style_name or "").strip()
+    if s.upper() == TEXT_STYLE_LOGIC_CAD_FONT.upper():
+        return "MS Gothic"
     if s and s.upper() not in {"STANDARD", "ANNOTATIVE"}:
         return s
     return _FONT_FAMILY_CANDIDATES[0]
@@ -280,7 +311,12 @@ def resolve_pdf_font_face_for_ui_family_chain(
     proj = read_project_preferred_font_family(doc) if doc is not None else None
     for fam in ui_font_family_chain(preferred_family, project_preferred_font=proj):
         found = fonts.find_best_match(family=fam, weight=400, italic=False)
-        if found is not None and found.filename:
+        if found is None:
+            continue
+        fn = str(found.filename or "").strip()
+        if fn and not Path(fn).is_file():
+            continue
+        if fn or str(found.family or "").strip():
             return found
     return None
 
@@ -561,6 +597,47 @@ def _single_line_render_params(
     )
 
 
+def _resolve_outline_font_face(
+    doc: Any | None,
+    *,
+    entity: DXFEntity | None = None,
+    style_name: str | None = None,
+    pdf_like_face_table: Mapping[str, Any] | None = None,
+) -> Any | None:
+    """Resolve PDF-aligned outline font face when *doc* is available.
+
+    Args:
+        doc: DXF drawing.
+        entity: Optional text entity (preferred lookup).
+        style_name: TEXTSTYLE name when *entity* is omitted.
+        pdf_like_face_table: Optional pre-built style table.
+
+    Returns:
+        ezdxf ``FontFace`` or ``None``.
+    """
+
+    if doc is None:
+        return None
+    from logic_cad.core.text.pdf_like_font_faces import (
+        get_pdf_like_font_face_table,
+        resolve_outline_font_face_for_entity,
+        resolve_outline_font_face_for_style_name,
+    )
+
+    table = (
+        pdf_like_face_table
+        if pdf_like_face_table is not None
+        else get_pdf_like_font_face_table(doc)
+    )
+    if entity is not None:
+        return resolve_outline_font_face_for_entity(entity, doc, table)
+    return resolve_outline_font_face_for_style_name(
+        doc,
+        str(style_name or "Standard"),
+        face_table=table,
+    )
+
+
 def build_single_line_layout(
     *,
     text: str,
@@ -573,6 +650,7 @@ def build_single_line_layout(
     valign: int = 0,
     font_family: str | None = None,
     doc: Any | None = None,
+    pdf_like_face_table: Mapping[str, Any] | None = None,
 ) -> NormalizedTextLayout:
     """Build normalized layout for app-generated single-line text.
 
@@ -587,6 +665,7 @@ def build_single_line_layout(
         valign: TEXT vertical alignment code.
         font_family: Optional preferred family.
         doc: Optional DXF drawing for project preferred font resolution.
+        pdf_like_face_table: Optional pre-built PDF-like font table for Qt/PDF parity.
 
     Returns:
         Normalized single-line text layout.
@@ -595,6 +674,11 @@ def build_single_line_layout(
     fam = str(font_family or "").strip() or preferred_ui_font_family(None)
     proj = read_project_preferred_font_family(doc) if doc is not None else None
     fam_chain = ui_font_family_chain(fam, project_preferred_font=proj)
+    outline_face = _resolve_outline_font_face(
+        doc,
+        style_name="Standard",
+        pdf_like_face_table=pdf_like_face_table,
+    )
     h = max(0.25, float(height_mm or 0.25))
     return NormalizedTextLayout(
         text=normalize_newlines(text),
@@ -618,6 +702,7 @@ def build_single_line_layout(
         attachment_point=0,
         font_family=fam_chain[0],
         font_families=fam_chain,
+        outline_font_face=outline_face,
     )
 
 
@@ -626,6 +711,7 @@ def normalize_dxf_text_entity(
     *,
     text_override: str | None = None,
     height_override_mm: float | None = None,
+    pdf_like_face_table: Mapping[str, Any] | None = None,
 ) -> NormalizedTextLayout:
     """Normalize DXF TEXT/ATTDEF/ATTRIB/MTEXT into one layout representation.
 
@@ -633,6 +719,7 @@ def normalize_dxf_text_entity(
         entity: Source DXF text-like entity.
         text_override: Optional replacement display text.
         height_override_mm: Optional explicit height in millimeters.
+        pdf_like_face_table: Optional pre-built PDF-like font table for Qt/PDF parity.
 
     Returns:
         Normalized text layout.
@@ -646,6 +733,11 @@ def normalize_dxf_text_entity(
     edoc = getattr(entity, "doc", None)
     proj = read_project_preferred_font_family(edoc) if edoc is not None else None
     fam_chain = ui_font_family_chain(fam, project_preferred_font=proj)
+    outline_face = _resolve_outline_font_face(
+        edoc,
+        entity=entity,
+        pdf_like_face_table=pdf_like_face_table,
+    )
     if dt == "MTEXT":
         if text_override is not None:
             text = str(text_override)
@@ -688,6 +780,7 @@ def normalize_dxf_text_entity(
             attachment_point=ap,
             font_family=fam_chain[0],
             font_families=fam_chain,
+            outline_font_face=outline_face,
         )
     if dt in {"TEXT", "ATTDEF", "ATTRIB"}:
         text = str(text_override) if text_override is not None else str(getattr(entity.dxf, "text", "") or "")
@@ -746,5 +839,6 @@ def normalize_dxf_text_entity(
             attachment_point=0,
             font_family=fam_chain[0],
             font_families=fam_chain,
+            outline_font_face=outline_face,
         )
     raise ValueError(f"Unsupported text entity type: {dt}")

@@ -252,7 +252,7 @@ python -m logic_cad.app.main
 | **図枠/目次が表示されない** | テンプレート未適用 or `LD_PAPER_FRAME` / `LD_CONTENTS_AREA` 欠如。**図枠テンプレートを適用…** |
 | **Undo/Redo が効かない** | 稀なケース。保存後再オープン |
 | **雲マークの形状が崩れる** | XDATA 破損。プロパティで再編集 or 削除→再作成 |
-| **日本語が□になる (他CAD)** | フォント未対応。テンプレート側で STYLE を修正 |
+| **日本語が□になる (他CAD)** | Logic CAD で**保存した** DXF は TEXTSTYLE ``LOGIC_CAD_FONT``（日本語向け TTF/TTC）を使う想定。初回保存で図枠ブロック内の文字も付け替わります。BricsCAD で ``?`` のときは PC にフォントがあるか確認し、文字スタイルを ``Standard`` に戻さない |
 | **ページ複製ができない** | 目次用レイアウト (`0*`) は対象外 |
 
 **ログ確認**: `--debug` で `logic_cad.*` ログ出力。ルーティング詳細（verbose）も同時に有効（`developer.md` 参照）。

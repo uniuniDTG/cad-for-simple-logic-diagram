@@ -15,7 +15,7 @@ _CHECKBOX_CHECKED_URI = _asset_uri("checkbox_checked.svg")
 
 
 _APP_STYLESHEET_TEMPLATE = """
-QMainWindow, QWidget { background-color: #252830; color: #d8d8dc; font-family: "Segoe UI", sans-serif; font-size: 9pt; }
+QMainWindow, QWidget { background-color: #252830; color: #d8d8dc; font-family: "__APP_FONT_FAMILY__", sans-serif; font-size: 9pt; }
 
 QStatusBar {
     background-color: #1e2026;
@@ -404,7 +404,27 @@ QProgressBar {
 QProgressBar::chunk { background-color: #3a8ab8; border-radius: 1px; }
 """.strip()
 
-APP_STYLESHEET = (
-    _APP_STYLESHEET_TEMPLATE.replace("__CHECKBOX_UNCHECKED_URI__", _CHECKBOX_UNCHECKED_URI)
-    .replace("__CHECKBOX_CHECKED_URI__", _CHECKBOX_CHECKED_URI)
+def build_app_stylesheet() -> str:
+    """Build the application stylesheet with resolved UI font family.
+
+    Must be called after ``QApplication`` exists (uses :func:`~logic_cad.ui.app_font.resolve_app_ui_font_family`).
+
+    Returns:
+        Complete Qt stylesheet string.
+    """
+    from logic_cad.ui.app_font import resolve_app_ui_font_family
+
+    family = resolve_app_ui_font_family()
+    return (
+        _APP_STYLESHEET_TEMPLATE.replace("__CHECKBOX_UNCHECKED_URI__", _CHECKBOX_UNCHECKED_URI)
+        .replace("__CHECKBOX_CHECKED_URI__", _CHECKBOX_CHECKED_URI)
+        .replace("__APP_FONT_FAMILY__", family)
+    )
+
+
+# Legacy import path: prefer :func:`build_app_stylesheet` after QApplication is created.
+APP_STYLESHEET = _APP_STYLESHEET_TEMPLATE.replace(
+    "__CHECKBOX_UNCHECKED_URI__", _CHECKBOX_UNCHECKED_URI
+).replace("__CHECKBOX_CHECKED_URI__", _CHECKBOX_CHECKED_URI).replace(
+    "__APP_FONT_FAMILY__", "sans-serif"
 )

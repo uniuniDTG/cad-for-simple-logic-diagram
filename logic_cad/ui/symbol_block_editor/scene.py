@@ -373,7 +373,7 @@ class AttdefEditItem(QGraphicsItem):
             fit_length_mm=lay.render_fit_length_mm,
             fit_mode=lay.render_fit_mode,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if r is None or r.isEmpty():
             return QRectF(0, 0, 1, 1)
@@ -402,7 +402,7 @@ class AttdefEditItem(QGraphicsItem):
             fit_mode=lay.render_fit_mode,
             fill=fill,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if option.state & QStyle.StateFlag.State_Selected:
             p = QPen(QColor(90, 170, 255), 0)
@@ -498,7 +498,7 @@ class BlockTextEditItem(QGraphicsItem):
             fit_length_mm=lay.render_fit_length_mm,
             fit_mode=lay.render_fit_mode,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if r is None or r.isEmpty():
             return QRectF(0, 0, 1, 1)
@@ -521,7 +521,7 @@ class BlockTextEditItem(QGraphicsItem):
             fit_mode=lay.render_fit_mode,
             fill=QColor(200, 200, 210),
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if option.state & QStyle.StateFlag.State_Selected:
             p = QPen(QColor(90, 170, 255), 0)
@@ -583,7 +583,7 @@ class BlockMTextEditItem(DxfMTextItem):
             valign=lay.valign,
             width_fac=lay.width_factor,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         self._bounds = br if br is not None and not br.isEmpty() else QRectF(-0.5, -0.5, 1.0, 1.0)
         self._programmatic_pos_depth += 1
@@ -627,7 +627,7 @@ class BlockMTextEditItem(DxfMTextItem):
             valign=lay.valign,
             width_fac=lay.width_factor,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if br is None or br.isEmpty():
             return QRectF(-0.5, -0.5, 1.0, 1.0)
@@ -649,7 +649,7 @@ class BlockMTextEditItem(DxfMTextItem):
             width_fac=lay.width_factor,
             fill=self._color,
             font_family=lay.font_family,
-            font_families=lay.font_families,
+            outline_font_face=lay.outline_font_face,
         )
         if option.state & QStyle.StateFlag.State_Selected:
             p = QPen(QColor(90, 170, 255), 0)

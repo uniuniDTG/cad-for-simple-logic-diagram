@@ -9,6 +9,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from logic_cad.core.routing.profile import ENV_ROUTING_FIXED, ENV_ROUTING_OVG
+from logic_cad.ui.app_font import application_ui_font
 from logic_cad.ui.app_user_settings import APP_DISPLAY_NAME, APP_ORG_NAME
 from logic_cad.ui.logging import install_process_stream_capture, install_python_logging_bridge
 from logic_cad.ui.main_window import MainWindow
@@ -69,6 +70,7 @@ def main() -> None:
     app = QApplication(sys.argv)
     app.setOrganizationName(APP_ORG_NAME)
     app.setApplicationName(APP_DISPLAY_NAME)
+    app.setFont(application_ui_font())
     win = MainWindow()
     win.show()
     sys.exit(app.exec())

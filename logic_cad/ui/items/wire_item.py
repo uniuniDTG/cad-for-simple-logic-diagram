@@ -177,6 +177,9 @@ class WireItem(QGraphicsPathItem):
         self._build_path(self._points)
 
     def set_hover_segment(self, seg_i: int | None) -> None:
+        """Highlight parallel-drag segment *seg_i*; no-op when unchanged to avoid redundant repaints."""
+        if self._hover_segment == seg_i:
+            return
         self._hover_segment = seg_i
         self.update()
 

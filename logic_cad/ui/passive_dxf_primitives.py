@@ -197,7 +197,7 @@ class _PassiveDxfTextItem(QGraphicsItem):
             fit_length_mm=self._layout.render_fit_length_mm,
             fit_mode=self._layout.render_fit_mode,
             font_family=self._layout.font_family,
-            font_families=self._layout.font_families,
+            outline_font_face=self._layout.outline_font_face,
         )
         if r is None or r.isEmpty():
             return QRectF(0, 0, 1, 1)
@@ -232,7 +232,7 @@ class _PassiveDxfTextItem(QGraphicsItem):
             fit_mode=self._layout.render_fit_mode,
             fill=self._fill,
             font_family=self._layout.font_family,
-            font_families=self._layout.font_families,
+            outline_font_face=self._layout.outline_font_face,
         )
 
 

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from PySide6.QtWidgets import QMessageBox
 
 from logic_cad.core.debug.debug_log import logic_cad_log
+from logic_cad.ui.dialogs.inpage_link_place_dialog import run_inpage_link_place_dialog
 from logic_cad.ui.dialogs.page_link_place_dialog import run_page_link_place_dialog
 from logic_cad.ui.panels.palette_panel import MIME_PALETTE
 from logic_cad.ui.snap_utils import snap_dxf_pos
@@ -64,10 +65,20 @@ def view_drop(win: MainWindow, event) -> None:
         win._refresh_scene()
         return
     if kind == "inpage_link":
+        picked = run_inpage_link_place_dialog(win)
+        if picked is None:
+            event.ignore()
+            return
         try:
             with win._diagram.begin("inpage_link"):
                 uid_from = win._diagram.place_inpage_link((x, y))
                 win._diagram.place_inpage_link_peer(uid_from, (x + 28.0, y + 22.0))
+                if not picked.link_name_auto:
+                    win._diagram.set_inpage_ref_link_display(
+                        uid_from,
+                        link_name_auto=False,
+                        display_text=picked.display_text,
+                    )
         except Exception as ex:
             QMessageBox.warning(win, "インページリンク", str(ex))
             event.ignore()

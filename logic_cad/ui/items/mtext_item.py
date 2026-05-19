@@ -32,7 +32,7 @@ class DxfMTextItem(QGraphicsItem):
             valign=layout.valign,
             width_fac=layout.width_factor,
             font_family=layout.font_family,
-            font_families=layout.font_families,
+            outline_font_face=layout.outline_font_face,
         )
         self._bounds = br if br is not None and not br.isEmpty() else QRectF(-0.5, -0.5, 1.0, 1.0)
         self.setPos(QPointF(layout.anchor_x, -layout.anchor_y))
@@ -74,5 +74,5 @@ class DxfMTextItem(QGraphicsItem):
             width_fac=self._layout.width_factor,
             fill=self._color,
             font_family=self._layout.font_family,
-            font_families=self._layout.font_families,
+            outline_font_face=self._layout.outline_font_face,
         )

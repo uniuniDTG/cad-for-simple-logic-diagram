@@ -12,6 +12,7 @@ from ezdxf.entities import DXFGraphic
 from ezdxf.lldxf.tags import Tags
 from ezdxf.lldxf.types import DXFTag
 
+from logic_cad.core.dxf.text_style import coerce_entity_style_to_logic_cad_font_if_default, merge_logic_cad_text_style_attrib
 from logic_cad.core.model.constants import APPID
 
 
@@ -441,17 +442,18 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
             g["text"],
             height=g["height"],
             rotation=g.get("rotation", 0),
-            dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
+            dxfattribs=merge_logic_cad_text_style_attrib(_restore_dxfattribs_layer_linetype_color(att)),
         )
         entity.dxf.insert = g["insert"][:2]
         _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
+        coerce_entity_style_to_logic_cad_font_if_default(entity)
     elif et == "MTEXT":
         g = geom
         body = str(g.get("text", "")).replace("\r\n", "\n").replace("\r", "\n")
         dxf_body = body.replace("\n", "\\P")
         entity = blk.add_mtext(
             dxf_body,
-            dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
+            dxfattribs=merge_logic_cad_text_style_attrib(_restore_dxfattribs_layer_linetype_color(att)),
         )
         ins = g.get("insert") or (0.0, 0.0, 0.0)
         entity.dxf.insert = (float(ins[0]), float(ins[1]), float(ins[2]) if len(ins) > 2 else 0.0)
@@ -461,6 +463,8 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
         entity.dxf.width = ww if ww > 1e-9 else 0.0
         ap = int(g.get("attachment_point", 1) or 1)
         entity.dxf.attachment_point = ap if 1 <= ap <= 9 else 1
+        _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
+        coerce_entity_style_to_logic_cad_font_if_default(entity)
     elif et == "ATTDEF":
         g = geom
         entity = blk.add_attdef(
@@ -469,9 +473,10 @@ def restore_entity_from_payload(doc: Drawing, payload: dict[str, Any]) -> DXFEnt
             insert=g["insert"][:2],
             height=g["height"],
             rotation=g.get("rotation", 0),
-            dxfattribs=_restore_dxfattribs_layer_linetype_color(att),
+            dxfattribs=merge_logic_cad_text_style_attrib(_restore_dxfattribs_layer_linetype_color(att)),
         )
         _apply_text_like_fields_from_dxfattribs_snapshot(entity, att)
+        coerce_entity_style_to_logic_cad_font_if_default(entity)
     else:
         return None
 
